@@ -1,0 +1,113 @@
+import uuid
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.common.exceptions import BadRequestError
+from app.core.config import settings
+from app.modules.rewards.earning_models import (
+    EarningEntryType,
+    EarningLedgerEntry,
+    WithdrawalRequest,
+    WithdrawalStatus,
+)
+from app.modules.rewards.models import RewardEntryType, RewardLedgerEntry
+from app.services.payment_service import payment_service
+
+
+# ---------------- Reward points (patient side) ----------------
+
+async def get_reward_balance(db: AsyncSession, user_id: uuid.UUID) -> int:
+    credits = await db.execute(
+        select(func.coalesce(func.sum(RewardLedgerEntry.points), 0)).where(
+            RewardLedgerEntry.user_id == user_id,
+            RewardLedgerEntry.entry_type.in_([RewardEntryType.CREDIT_REFUND, RewardEntryType.CREDIT_PROMO]),
+        )
+    )
+    debits = await db.execute(
+        select(func.coalesce(func.sum(RewardLedgerEntry.points), 0)).where(
+            RewardLedgerEntry.user_id == user_id,
+            RewardLedgerEntry.entry_type == RewardEntryType.DEBIT_REDEMPTION,
+        )
+    )
+    return int(credits.scalar_one()) - int(debits.scalar_one())
+
+
+async def credit_reward_points(
+    db: AsyncSession, user_id: uuid.UUID, points: int, booking_id: uuid.UUID | None, note: str
+) -> RewardLedgerEntry:
+    entry = RewardLedgerEntry(
+        user_id=user_id,
+        entry_type=RewardEntryType.CREDIT_REFUND,
+        points=points,
+        related_booking_id=booking_id,
+        note=note,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+# ---------------- Facility earnings (merchant side) ----------------
+
+async def get_earning_balance(db: AsyncSession, facility_id: uuid.UUID) -> float:
+    credits = await db.execute(
+        select(func.coalesce(func.sum(EarningLedgerEntry.amount), 0)).where(
+            EarningLedgerEntry.facility_id == facility_id,
+            EarningLedgerEntry.entry_type == EarningEntryType.CREDIT_BOOKING,
+        )
+    )
+    debits = await db.execute(
+        select(func.coalesce(func.sum(EarningLedgerEntry.amount), 0)).where(
+            EarningLedgerEntry.facility_id == facility_id,
+            EarningLedgerEntry.entry_type == EarningEntryType.DEBIT_WITHDRAWAL,
+        )
+    )
+    return float(credits.scalar_one()) - float(debits.scalar_one())
+
+
+async def credit_facility_earning(
+    db: AsyncSession, facility_id: uuid.UUID, amount: float, booking_id: uuid.UUID, note: str
+) -> EarningLedgerEntry:
+    entry = EarningLedgerEntry(
+        facility_id=facility_id,
+        entry_type=EarningEntryType.CREDIT_BOOKING,
+        amount=amount,
+        related_booking_id=booking_id,
+        note=note,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+async def request_withdrawal(db: AsyncSession, facility_id: uuid.UUID, amount: float) -> WithdrawalRequest:
+    if amount < settings.min_withdrawal_amount:
+        raise BadRequestError(f"Minimum withdrawal amount is {settings.min_withdrawal_amount}")
+
+    balance = await get_earning_balance(db, facility_id)
+    if amount > balance:
+        raise BadRequestError("Insufficient earnings balance")
+
+    withdrawal = WithdrawalRequest(facility_id=facility_id, amount=amount, status=WithdrawalStatus.PENDING)
+    db.add(withdrawal)
+    await db.commit()
+    await db.refresh(withdrawal)
+
+    # NOTE: actual Paytm Payout API call is a stub for now — see
+    # app/services/payment_service.py header for the security-review caveat.
+    # In production this should be dispatched to a background worker
+    # (Celery), not called inline in the request/response cycle.
+    debit = EarningLedgerEntry(
+        facility_id=facility_id,
+        entry_type=EarningEntryType.DEBIT_WITHDRAWAL,
+        amount=amount,
+        note=f"Withdrawal request {withdrawal.id} (payout pending Paytm integration)",
+    )
+    db.add(debit)
+    withdrawal.status = WithdrawalStatus.PROCESSING
+    await db.commit()
+    await db.refresh(withdrawal)
+    return withdrawal
