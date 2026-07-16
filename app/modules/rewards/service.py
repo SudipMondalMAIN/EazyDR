@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import BadRequestError
 from app.core.config import settings
+from app.modules.facilities.models import Facility
 from app.modules.facilities.service import verify_facility_owner
 from app.modules.rewards.earning_models import (
     EarningEntryType,
@@ -93,6 +94,18 @@ async def request_withdrawal(
     await verify_facility_owner(db, facility_id, merchant_user_id)
     if amount < settings.min_withdrawal_amount:
         raise BadRequestError(f"Minimum withdrawal amount is {settings.min_withdrawal_amount}")
+
+    # CRITICAL: lock this facility's row for the rest of the transaction
+    # before reading the balance. Without this, two concurrent withdrawal
+    # requests can both read the same balance (e.g. ₹500), both pass the
+    # `amount > balance` check for a ₹400 withdrawal, and both insert a
+    # debit — draining ₹800 from a ₹500 balance (double-withdraw / TOCTOU
+    # race). SELECT ... FOR UPDATE makes the second request's transaction
+    # block until the first commits, so it re-reads the *post-debit*
+    # balance and correctly gets rejected if funds are no longer sufficient.
+    # This only serializes requests for the *same* facility_id — other
+    # facilities' withdrawals are unaffected.
+    await db.execute(select(Facility.id).where(Facility.id == facility_id).with_for_update())
 
     balance = await get_earning_balance(db, facility_id)
     if amount > balance:
