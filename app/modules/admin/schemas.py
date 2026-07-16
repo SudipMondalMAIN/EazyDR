@@ -3,6 +3,20 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.modules.bookings.models import BookingStatus
+
+
+class BookingExportFilter(BaseModel):
+    """Query filters for Admin Booking PDF export. All fields optional —
+    an unset filter is simply not applied."""
+
+    date: str | None = None            # exact "YYYY-MM-DD" match on appointment_date
+    date_from: str | None = None       # inclusive range start "YYYY-MM-DD"
+    date_to: str | None = None         # inclusive range end "YYYY-MM-DD"
+    doctor_id: uuid.UUID | None = None
+    facility_id: uuid.UUID | None = None
+    status: BookingStatus | None = None
+
 
 class FacilityPricingUpdate(BaseModel):
     booking_fee: float | None = None
