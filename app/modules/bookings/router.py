@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.exceptions import ForbiddenError
 from app.core.database import get_db
 from app.modules.auth.dependencies import get_current_user, require_admin, require_patient
-from app.modules.auth.models import User
+from app.modules.auth.models import User, UserRole
 from app.modules.bookings import service
+from app.modules.facilities.service import get_facility
 from app.modules.bookings.schemas import (
     BookingCreate,
     BookingOut,
@@ -37,9 +38,16 @@ async def my_bookings(db: AsyncSession = Depends(get_db), user: User = Depends(r
 @router.get("/{booking_id}", response_model=BookingOut)
 async def get_booking(booking_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     booking = await service.get_booking(db, booking_id)
-    if booking.patient_id != user.id and user.role.value not in ("admin", "superadmin", "merchant"):
-        raise ForbiddenError("Not your booking")
-    return booking
+    if booking.patient_id == user.id or user.role in (UserRole.ADMIN, UserRole.SUPERADMIN):
+        return booking
+    if user.role == UserRole.MERCHANT:
+        # A merchant may only view bookings made at a facility they own —
+        # not any booking on the platform (was previously unchecked, which
+        # leaked other facilities' patient names/phones/addresses).
+        facility = await get_facility(db, booking.facility_id)
+        if facility.owner_user_id == user.id:
+            return booking
+    raise ForbiddenError("Not your booking")
 
 
 @router.post("/{booking_id}/cancel", response_model=CancelBookingResult)

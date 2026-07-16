@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.exceptions import NotFoundError
+from app.common.exceptions import ForbiddenError, NotFoundError
 from app.modules.facilities.models import Doctor, DoctorAvailability, Facility
 from app.modules.facilities.schemas import (
     AvailabilitySlotCreate,
@@ -66,6 +66,25 @@ async def search_facilities(db: AsyncSession, params: FacilitySearchParams) -> l
     # Sponsored facilities float to the top, then by distance (nearest first)
     scored.sort(key=lambda pair: (not pair[0].is_ad_sponsored, pair[1] if pair[1] is not None else 0))
     return scored
+
+
+async def verify_facility_owner(db: AsyncSession, facility_id: uuid.UUID, user_id: uuid.UUID) -> Facility:
+    """Raises ForbiddenError unless `user_id` owns the given facility.
+    Every merchant-only endpoint that acts on a specific facility (or a
+    doctor/queue belonging to one) must call this — `require_merchant`
+    only checks the user's *role*, never which facility they actually own."""
+    facility = await get_facility(db, facility_id)  # raises NotFoundError if missing
+    if facility.owner_user_id != user_id:
+        raise ForbiddenError("You do not have permission to manage this facility")
+    return facility
+
+
+async def verify_doctor_owner(db: AsyncSession, doctor_id: uuid.UUID, user_id: uuid.UUID) -> Doctor:
+    """Raises ForbiddenError unless `user_id` owns the facility this doctor
+    belongs to. Returns the Doctor if ownership checks out."""
+    doctor = await get_doctor(db, doctor_id)  # raises NotFoundError if missing
+    await verify_facility_owner(db, doctor.facility_id, user_id)
+    return doctor
 
 
 async def add_doctor(db: AsyncSession, facility_id: uuid.UUID, payload: DoctorCreate) -> Doctor:

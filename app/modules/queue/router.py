@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/queue", tags=["queue"])
 async def check_in_qr(
     payload: QrCheckInRequest, db: AsyncSession = Depends(get_db), user: User = Depends(require_merchant)
 ):
-    booking = await service.check_in_by_qr(db, payload.qr_uuid, payload.signature)
+    booking = await service.check_in_by_qr(db, payload.qr_uuid, payload.signature, user.id)
     return CheckInResult(
         booking_id=booking.id,
         patient_name=booking.patient_name,
@@ -32,7 +32,7 @@ async def check_in_manual(
     payload: ManualCheckInRequest, db: AsyncSession = Depends(get_db), user: User = Depends(require_merchant)
 ):
     booking = await service.check_in_manual(
-        db, payload.doctor_id, payload.appointment_date, payload.booking_id, payload.patient_phone
+        db, payload.doctor_id, payload.appointment_date, payload.booking_id, payload.patient_phone, user.id
     )
     return CheckInResult(
         booking_id=booking.id,

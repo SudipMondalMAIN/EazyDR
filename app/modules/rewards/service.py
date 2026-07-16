@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import BadRequestError
 from app.core.config import settings
+from app.modules.facilities.service import verify_facility_owner
 from app.modules.rewards.earning_models import (
     EarningEntryType,
     EarningLedgerEntry,
@@ -83,7 +84,13 @@ async def credit_facility_earning(
     return entry
 
 
-async def request_withdrawal(db: AsyncSession, facility_id: uuid.UUID, amount: float) -> WithdrawalRequest:
+async def request_withdrawal(
+    db: AsyncSession, facility_id: uuid.UUID, amount: float, merchant_user_id: uuid.UUID
+) -> WithdrawalRequest:
+    # CRITICAL: without this check any merchant could drain any other
+    # facility's earnings ledger to their own bank/UPI via the Paytm
+    # Payout API just by guessing/enumerating a facility_id.
+    await verify_facility_owner(db, facility_id, merchant_user_id)
     if amount < settings.min_withdrawal_amount:
         raise BadRequestError(f"Minimum withdrawal amount is {settings.min_withdrawal_amount}")
 

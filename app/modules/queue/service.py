@@ -9,6 +9,7 @@ from app.common.exceptions import BadRequestError, NotFoundError
 from app.core.config import settings
 from app.modules.bookings.models import Booking, BookingStatus
 from app.modules.bookings.service import get_booking_by_qr
+from app.modules.facilities.service import verify_doctor_owner
 from app.modules.queue.models import QueueState
 from app.services.notification_service import notification_service
 
@@ -70,8 +71,14 @@ async def _advance_queue(db: AsyncSession, booking: Booking) -> QueueState:
     return state
 
 
-async def check_in_by_qr(db: AsyncSession, qr_uuid: uuid.UUID, signature: str) -> Booking:
+async def check_in_by_qr(
+    db: AsyncSession, qr_uuid: uuid.UUID, signature: str, merchant_user_id: uuid.UUID
+) -> Booking:
     booking = await get_booking_by_qr(db, qr_uuid, signature)
+    # Ownership check must happen after we know which doctor/facility this
+    # booking belongs to, and before any status mutation — a merchant must
+    # only ever be able to check in patients at a facility they own.
+    await verify_doctor_owner(db, booking.doctor_id, merchant_user_id)
     if booking.status == BookingStatus.CANCELLED:
         raise BadRequestError("This booking was cancelled")
     if booking.status in (BookingStatus.CHECKED_IN, BookingStatus.COMPLETED):
@@ -86,9 +93,11 @@ async def check_in_manual(
     appointment_date: str,
     booking_id: uuid.UUID | None,
     patient_phone: str | None,
+    merchant_user_id: uuid.UUID,
 ) -> Booking:
     """Fallback for walk-ins without a visible/scannable QR — verify by
     Booking ID or phone number instead."""
+    await verify_doctor_owner(db, doctor_id, merchant_user_id)
     if not booking_id and not patient_phone:
         raise BadRequestError("Provide either booking_id or patient_phone")
 

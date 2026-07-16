@@ -89,6 +89,7 @@ async def add_doctor(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_merchant),
 ):
+    await service.verify_facility_owner(db, facility_id, user.id)
     doctor = await service.add_doctor(db, facility_id, payload)
     # New doctor can match a doctor-name/specialty search and shows up in
     # this facility's doctor list — invalidate both.
@@ -119,6 +120,7 @@ async def set_availability(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_merchant),
 ):
+    await service.verify_doctor_owner(db, doctor_id, user.id)
     return await service.set_availability(db, doctor_id, payload)
 
 
