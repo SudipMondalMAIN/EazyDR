@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +26,15 @@ class PaymentMode(str, enum.Enum):
 
 class Booking(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "bookings"
+    __table_args__ = (
+        # Prevents the token-number race condition: two concurrent bookings
+        # for the same doctor/day computing the same MAX(token_number)+1 will
+        # have one of them rejected at the DB level instead of silently
+        # producing duplicate tokens.
+        UniqueConstraint(
+            "doctor_id", "appointment_date", "token_number", name="uq_booking_doctor_date_token"
+        ),
+    )
 
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), index=True)

@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     app_name: str = "EazyDoctor"
     environment: str = "development"
     port: int = 8000
+    # Local timezone appointments are booked/expected in (IANA name — must
+    # stay configurable since a future all-India rollout may need per-region
+    # handling; never assume the server's own clock/timezone).
+    app_timezone: str = "Asia/Kolkata"
 
     # Auth
     jwt_secret: str = "insecure-dev-secret-change-me"

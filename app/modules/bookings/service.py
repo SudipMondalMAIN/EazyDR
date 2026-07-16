@@ -4,9 +4,11 @@ import hmac
 import io
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import qrcode
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import BadRequestError, ConflictError, NotFoundError
@@ -55,7 +57,6 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
     commission_amount = round(booking_fee * commission_percent / 100, 2)
     facility_amount = round(booking_fee - commission_amount, 2)
 
-    token_number = await _next_token_number(db, doctor.id, payload.appointment_date)
     qr_uuid = uuid.uuid4()
     signature = _sign_qr(qr_uuid)
 
@@ -70,28 +71,50 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             )
         status = BookingStatus.PENDING  # flips to CONFIRMED once payment callback verifies
 
-    booking = Booking(
-        patient_id=patient_id,
-        facility_id=facility.id,
-        doctor_id=doctor.id,
-        patient_name=payload.patient_name,
-        patient_phone=payload.patient_phone,
-        patient_address=payload.patient_address,
-        token_number=token_number,
-        appointment_date=payload.appointment_date,
-        expected_time=payload.expected_time,
-        booking_fee=booking_fee,
-        platform_commission_amount=commission_amount,
-        facility_earning_amount=facility_amount,
-        payment_mode=payload.payment_mode,
-        payment_transaction_ref=payment_result.transaction_ref,
-        status=status,
-        qr_uuid=qr_uuid,
-        qr_signature=signature,
-    )
-    db.add(booking)
-    await db.commit()
-    await db.refresh(booking)
+    # Token numbers are assigned by MAX(token_number)+1, which is not safe
+    # under concurrency on its own — two requests can read the same MAX and
+    # both try to insert the same next token. The DB-level unique constraint
+    # on (doctor_id, appointment_date, token_number) is the real guard; if
+    # it fires we recompute the next token and retry the insert a few times
+    # rather than surfacing a spurious failure to the patient. We do NOT
+    # redo payment initiation on retry — that already succeeded/was
+    # recorded above and must not be repeated per attempt.
+    max_attempts = 5
+    booking: Booking | None = None
+    for attempt in range(max_attempts):
+        token_number = await _next_token_number(db, doctor.id, payload.appointment_date)
+        booking = Booking(
+            patient_id=patient_id,
+            facility_id=facility.id,
+            doctor_id=doctor.id,
+            patient_name=payload.patient_name,
+            patient_phone=payload.patient_phone,
+            patient_address=payload.patient_address,
+            token_number=token_number,
+            appointment_date=payload.appointment_date,
+            expected_time=payload.expected_time,
+            booking_fee=booking_fee,
+            platform_commission_amount=commission_amount,
+            facility_earning_amount=facility_amount,
+            payment_mode=payload.payment_mode,
+            payment_transaction_ref=payment_result.transaction_ref,
+            status=status,
+            qr_uuid=qr_uuid,
+            qr_signature=signature,
+        )
+        db.add(booking)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            if attempt == max_attempts - 1:
+                raise ConflictError(
+                    "Could not assign a queue token — please try booking again"
+                )
+            continue
+        else:
+            await db.refresh(booking)
+            break
 
     # Credit facility earnings immediately for cash (settlement of the
     # platform's cut with the facility is handled out-of-band per spec
@@ -131,10 +154,20 @@ async def list_bookings_for_patient(db: AsyncSession, patient_id: uuid.UUID) -> 
     return list(result.scalars().all())
 
 
+_APP_TZ = ZoneInfo(settings.app_timezone)
+
+
 def _appointment_datetime(booking: Booking) -> datetime:
-    return datetime.strptime(
+    """Appointment date/time are stored as naive local wall-clock values
+    (e.g. "14:30" as told to the patient at a Bolpur facility) — i.e. IST,
+    not UTC. Interpret them in the configured app timezone and convert to
+    an aware UTC datetime so comparisons against datetime.now(timezone.utc)
+    are correct. Getting this wrong shifts the cancellation lock window by
+    the full UTC offset (5.5 hours for IST)."""
+    naive_local = datetime.strptime(
         f"{booking.appointment_date} {booking.expected_time}", "%Y-%m-%d %H:%M"
-    ).replace(tzinfo=timezone.utc)
+    )
+    return naive_local.replace(tzinfo=_APP_TZ).astimezone(timezone.utc)
 
 
 async def cancel_booking(
