@@ -9,6 +9,7 @@ from app.core.database import Base, engine
 from app.core.rate_limit import RateLimitMiddleware
 from app.modules.admin.router import router as admin_router
 from app.modules.auth.router import router as auth_router
+from app.modules.banners.router import router as banners_router
 from app.modules.bookings.router import router as bookings_router
 from app.modules.facilities.router import router as facilities_router
 from app.modules.queue.router import router as queue_router
@@ -42,6 +43,7 @@ app.include_router(queue_router)
 app.include_router(rewards_router)
 app.include_router(settlements_router)
 app.include_router(admin_router)
+app.include_router(banners_router)
 
 
 @app.on_event("startup")
