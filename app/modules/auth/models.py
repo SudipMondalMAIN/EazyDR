@@ -20,11 +20,14 @@ class User(Base, UUIDPKMixin, TimestampMixin):
 
     full_name: Mapped[str] = mapped_column(String(150))
     phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    email: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True)
+    # Email is required (OTP for signup/login/forgot-password is sent here;
+    # phone is kept only for profile/contact purposes, never for OTP).
+    email: Mapped[str] = mapped_column(String(150), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.PATIENT, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # 2FA required for SUPERADMIN role (enforced in auth service, not just UI)
     totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)

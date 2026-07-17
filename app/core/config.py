@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     firebase_credentials_json: str = ""
     firebase_database_url: str = ""
 
+    # Email (Brevo) — used for OTP delivery (signup/login/forgot-password)
+    # and all transactional notification emails. No SMS provider is used.
+    brevo_api_key: str = ""
+    brevo_sender_email: str = "no-reply@eazydoctor.app"
+    brevo_sender_name: str = "EazyDoctor"
+
+    # OTP
+    otp_length: int = 6
+    otp_expire_minutes: int = 10
+    otp_resend_cooldown_seconds: int = 60
+
     # Payments
     payment_provider: str = "cash_only"  # cash_only | paytm
     paytm_merchant_id: str = ""
