@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -19,6 +19,7 @@ from app.modules.auth.schemas import (
     VerifySignupOTPRequest,
 )
 from app.services import otp_service
+from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -80,4 +81,18 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
-    return user
+    return service.attach_photo_url(user)
+
+
+@router.post("/me/photo", response_model=UserOut)
+async def upload_my_photo(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set/replace the profile photo for the logged-in user — works for
+    patient, merchant, and admin/superadmin accounts alike, since it's
+    keyed off the current user, not their role."""
+    key = await storage_service.upload_file(file.file, folder="users")
+    user = await service.update_profile_photo(db, user, key)
+    return service.attach_photo_url(user)

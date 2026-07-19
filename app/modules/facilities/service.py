@@ -8,10 +8,13 @@ from app.modules.facilities.models import Doctor, DoctorAvailability, Facility
 from app.modules.facilities.schemas import (
     AvailabilitySlotCreate,
     DoctorCreate,
+    DoctorOut,
     FacilityCreate,
+    FacilityOut,
     FacilitySearchParams,
 )
 from app.services.geo_service import haversine_km
+from app.services.storage_service import storage_service
 
 
 async def create_facility(db: AsyncSession, owner_user_id: uuid.UUID, payload: FacilityCreate) -> Facility:
@@ -32,6 +35,26 @@ async def get_facility(db: AsyncSession, facility_id: uuid.UUID) -> Facility:
     facility = result.scalar_one_or_none()
     if not facility:
         raise NotFoundError("Facility not found")
+    return facility
+
+
+def attach_facility_photo_url(facility: Facility) -> FacilityOut:
+    out = FacilityOut.model_validate(facility)
+    if facility.photo_storage_key:
+        out.photo_url = storage_service.get_public_url(facility.photo_storage_key)
+    return out
+
+
+async def update_facility_photo(db: AsyncSession, facility_id: uuid.UUID, storage_key: str) -> Facility:
+    facility = await get_facility(db, facility_id)  # raises NotFoundError if missing
+    if facility.photo_storage_key:
+        try:
+            await storage_service.delete_file(facility.photo_storage_key)
+        except Exception:
+            pass
+    facility.photo_storage_key = storage_key
+    await db.commit()
+    await db.refresh(facility)
     return facility
 
 
@@ -128,6 +151,26 @@ async def update_doctor(db: AsyncSession, doctor_id: uuid.UUID, updates: dict) -
     for field, value in updates.items():
         if value is not None:
             setattr(doctor, field, value)
+    await db.commit()
+    await db.refresh(doctor)
+    return doctor
+
+
+def attach_doctor_photo_url(doctor: Doctor) -> DoctorOut:
+    out = DoctorOut.model_validate(doctor)
+    if doctor.photo_storage_key:
+        out.photo_url = storage_service.get_public_url(doctor.photo_storage_key)
+    return out
+
+
+async def update_doctor_photo(db: AsyncSession, doctor_id: uuid.UUID, storage_key: str) -> Doctor:
+    doctor = await get_doctor(db, doctor_id)  # raises NotFoundError if missing
+    if doctor.photo_storage_key:
+        try:
+            await storage_service.delete_file(doctor.photo_storage_key)
+        except Exception:
+            pass
+    doctor.photo_storage_key = storage_key
     await db.commit()
     await db.refresh(doctor)
     return doctor

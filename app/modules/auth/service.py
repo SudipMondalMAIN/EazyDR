@@ -10,8 +10,9 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.auth.models import User, UserRole
-from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
+from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
 from app.services import otp_service
+from app.services.storage_service import storage_service
 
 
 async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
@@ -160,6 +161,27 @@ def issue_tokens(user: User) -> TokenResponse:
         access_token=create_access_token(str(user.id), user.role.value),
         refresh_token=create_refresh_token(str(user.id)),
     )
+
+
+def attach_photo_url(user: User) -> UserOut:
+    out = UserOut.model_validate(user)
+    if user.photo_storage_key:
+        out.photo_url = storage_service.get_public_url(user.photo_storage_key)
+    return out
+
+
+async def update_profile_photo(db: AsyncSession, user: User, storage_key: str) -> User:
+    # Best-effort cleanup of the old photo — a failed delete shouldn't block
+    # the user from setting their new one.
+    if user.photo_storage_key:
+        try:
+            await storage_service.delete_file(user.photo_storage_key)
+        except Exception:
+            pass
+    user.photo_storage_key = storage_key
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 
 async def refresh_access_token(db: AsyncSession, refresh_token: str) -> TokenResponse:

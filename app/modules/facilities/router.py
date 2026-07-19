@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -18,6 +18,7 @@ from app.modules.facilities.schemas import (
     FacilitySearchParams,
 )
 from app.services.cache_service import cache_service
+from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/facilities", tags=["facilities"])
 
@@ -57,7 +58,7 @@ async def search_facilities(
     results = await service.search_facilities(db, params)
     out = []
     for facility, distance in results:
-        item = FacilityOut.model_validate(facility)
+        item = service.attach_facility_photo_url(facility)
         item.distance_km = round(distance, 2) if distance is not None else None
         out.append(item)
 
@@ -78,7 +79,7 @@ async def my_facilities(
     an existing facility on a fresh device instead of relying on a
     client-side cache of the facility id."""
     facilities = await service.list_facilities_for_owner(db, user.id)
-    return [FacilityOut.model_validate(f) for f in facilities]
+    return [service.attach_facility_photo_url(f) for f in facilities]
 
 
 @router.get("/{facility_id}", response_model=FacilityOut)
@@ -89,9 +90,25 @@ async def get_facility(facility_id: uuid.UUID, db: AsyncSession = Depends(get_db
         return FacilityOut.model_validate(cached)
 
     facility = await service.get_facility(db, facility_id)
-    out = FacilityOut.model_validate(facility)
+    out = service.attach_facility_photo_url(facility)
     await cache_service.set_json(cache_key, out.model_dump(mode="json"), settings.cache_ttl_facility_profile)
     return out
+
+
+@router.post("/{facility_id}/photo", response_model=FacilityOut)
+async def upload_facility_photo(
+    facility_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    await service.verify_facility_owner(db, facility_id, user.id)
+    key = await storage_service.upload_file(file.file, folder="facilities")
+    facility = await service.update_facility_photo(db, facility_id, key)
+    # Cached facility profile/search pages now have a stale (missing/old) photo.
+    await cache_service.delete(f"cache:facility:{facility_id}")
+    await cache_service.delete_prefix("cache:facility_search:")
+    return service.attach_facility_photo_url(facility)
 
 
 @router.post("/{facility_id}/doctors", response_model=DoctorOut, status_code=201)
@@ -118,11 +135,26 @@ async def list_doctors(facility_id: uuid.UUID, db: AsyncSession = Depends(get_db
         return [DoctorOut.model_validate(item) for item in cached]
 
     doctors = await service.list_doctors_for_facility(db, facility_id)
-    out = [DoctorOut.model_validate(d) for d in doctors]
+    out = [service.attach_doctor_photo_url(d) for d in doctors]
     await cache_service.set_json(
         cache_key, [item.model_dump(mode="json") for item in out], settings.cache_ttl_facility_profile
     )
     return out
+
+
+@router.post("/doctors/{doctor_id}/photo", response_model=DoctorOut)
+async def upload_doctor_photo(
+    doctor_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    await service.verify_doctor_owner(db, doctor_id, user.id)
+    key = await storage_service.upload_file(file.file, folder="doctors")
+    doctor = await service.update_doctor_photo(db, doctor_id, key)
+    await cache_service.delete(f"cache:facility:{doctor.facility_id}:doctors")
+    await cache_service.delete_prefix("cache:facility_search:")
+    return service.attach_doctor_photo_url(doctor)
 
 
 @router.post("/doctors/{doctor_id}/availability", response_model=AvailabilitySlotOut, status_code=201)

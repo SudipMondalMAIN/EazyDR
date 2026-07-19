@@ -28,6 +28,8 @@ class FacilityOut(BaseModel):
     is_verified: bool
     is_active: bool
     is_ad_sponsored: bool
+    photo_storage_key: str | None = None
+    photo_url: str | None = None
     distance_km: float | None = None
 
     class Config:
@@ -49,6 +51,8 @@ class DoctorOut(BaseModel):
     specialty: str
     consultation_fee: float
     is_active: bool
+    photo_storage_key: str | None = None
+    photo_url: str | None = None
 
     class Config:
         from_attributes = True

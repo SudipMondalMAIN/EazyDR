@@ -37,6 +37,8 @@ class UserOut(BaseModel):
     is_active: bool
     is_phone_verified: bool
     is_email_verified: bool
+    photo_storage_key: str | None = None
+    photo_url: str | None = None
 
     class Config:
         from_attributes = True

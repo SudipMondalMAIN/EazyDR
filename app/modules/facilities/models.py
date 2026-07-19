@@ -39,6 +39,9 @@ class Facility(Base, UUIDPKMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_ad_sponsored: Mapped[bool] = mapped_column(Boolean, default=False)  # "Sponsored" tag
 
+    # Merchant-uploaded photo of the facility (pharmacy/nursing home/chamber).
+    photo_storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     doctors: Mapped[list["Doctor"]] = relationship(back_populates="facility", cascade="all, delete-orphan")
 
 

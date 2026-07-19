@@ -33,4 +33,7 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_2fa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Profile photo — used by patient, merchant, and admin accounts alike.
+    photo_storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     device_push_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
