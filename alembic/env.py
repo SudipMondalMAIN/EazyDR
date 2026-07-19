@@ -13,7 +13,11 @@ from app.core.database import Base
 config = context.config
 # Pull DATABASE_URL from the app's own settings (env vars) instead of
 # duplicating it in alembic.ini — one source of truth for the connection string.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# NOTE: ConfigParser (which backs alembic's Config) treats "%" as the start
+# of interpolation syntax (e.g. "%(foo)s"). A password containing a
+# URL-encoded character such as "%40" (for "@") breaks set_main_option
+# unless every literal "%" is escaped as "%%" first.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
