@@ -50,6 +50,27 @@ async def get_booking(booking_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     raise ForbiddenError("Not your booking")
 
 
+@router.get("/{booking_id}/receipt", response_model=BookingWithQrOut)
+async def get_booking_receipt(
+    booking_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Full booking details + a freshly regenerated QR — for a printable
+    receipt/invoice view. Same ownership rule as GET /bookings/{id}: the
+    patient who made it, an admin, or the owning facility's merchant."""
+    booking = await service.get_booking(db, booking_id)
+    if not (
+        booking.patient_id == user.id
+        or user.role in (UserRole.ADMIN, UserRole.SUPERADMIN)
+        or (user.role == UserRole.MERCHANT and (await get_facility(db, booking.facility_id)).owner_user_id == user.id)
+    ):
+        raise ForbiddenError("Not your booking")
+
+    booking, qr_base64 = await service.get_booking_receipt(db, booking_id)
+    out = BookingWithQrOut.model_validate(booking)
+    out.qr_code_base64 = qr_base64
+    return out
+
+
 @router.post("/{booking_id}/cancel", response_model=CancelBookingResult)
 async def cancel_booking(
     booking_id: uuid.UUID,

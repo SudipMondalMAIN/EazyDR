@@ -29,10 +29,10 @@ class Settings(BaseSettings):
 
     # Database — provider-agnostic. Only this string changes on migration
     # (Supabase -> AWS RDS). No code elsewhere should know or care.
-    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/eazydoctor"
+    database_url: str = ""
 
     # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = ""
 
     # Rate limiting (see app/core/rate_limit.py for the per-route rules)
     rate_limit_enabled: bool = True
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Email (Brevo) — used for OTP delivery (signup/login/forgot-password)
     # and all transactional notification emails. No SMS provider is used.
     brevo_api_key: str = ""
-    brevo_sender_email: str = "no-reply@eazydoctor.app"
+    brevo_sender_email: str = "contact@fliq.us.cc"
     brevo_sender_name: str = "EazyDoctor"
 
     # OTP

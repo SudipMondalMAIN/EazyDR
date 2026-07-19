@@ -69,6 +69,18 @@ async def search_facilities(
     return out
 
 
+@router.get("/my", response_model=list[FacilityOut])
+async def my_facilities(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    """Facilities owned by the logged-in merchant — lets the client find
+    an existing facility on a fresh device instead of relying on a
+    client-side cache of the facility id."""
+    facilities = await service.list_facilities_for_owner(db, user.id)
+    return [FacilityOut.model_validate(f) for f in facilities]
+
+
 @router.get("/{facility_id}", response_model=FacilityOut)
 async def get_facility(facility_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     cache_key = f"cache:facility:{facility_id}"

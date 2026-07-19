@@ -131,3 +131,39 @@ async def request_withdrawal(
     await db.commit()
     await db.refresh(withdrawal)
     return withdrawal
+
+
+# ---------------- Admin dashboard read helpers ----------------
+
+async def list_reward_ledger_for_user(db: AsyncSession, user_id: uuid.UUID, limit: int = 100) -> list[RewardLedgerEntry]:
+    result = await db.execute(
+        select(RewardLedgerEntry)
+        .where(RewardLedgerEntry.user_id == user_id)
+        .order_by(RewardLedgerEntry.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_earning_ledger_for_facility(
+    db: AsyncSession, facility_id: uuid.UUID, limit: int = 100
+) -> list[EarningLedgerEntry]:
+    result = await db.execute(
+        select(EarningLedgerEntry)
+        .where(EarningLedgerEntry.facility_id == facility_id)
+        .order_by(EarningLedgerEntry.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_withdrawals_for_facility(
+    db: AsyncSession, facility_id: uuid.UUID, limit: int = 100
+) -> list[WithdrawalRequest]:
+    result = await db.execute(
+        select(WithdrawalRequest)
+        .where(WithdrawalRequest.facility_id == facility_id)
+        .order_by(WithdrawalRequest.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())

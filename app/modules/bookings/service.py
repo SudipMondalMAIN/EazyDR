@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import io
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -16,6 +17,8 @@ from app.core.config import settings
 from app.modules.bookings.models import Booking, BookingStatus, PaymentMode
 from app.modules.bookings.schemas import BookingCreate
 from app.modules.facilities.service import get_doctor, get_facility
+from app.modules.notifications.models import NotificationType
+from app.modules.notifications.service import create_notification
 from app.modules.rewards.service import credit_facility_earning, credit_reward_points
 from app.services.payment_service import payment_service
 
@@ -125,6 +128,30 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             db, facility.id, facility_amount, booking.id, "Cash booking — facility share"
         )
 
+    # Best-effort — an in-app notification failing must never fail the
+    # booking itself, so exceptions here are logged and swallowed.
+    try:
+        await create_notification(
+            db,
+            patient_id,
+            title="Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received",
+            body=f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
+            f"{payload.expected_time}.",
+            notification_type=NotificationType.BOOKING,
+            related_booking_id=booking.id,
+        )
+        await create_notification(
+            db,
+            facility.owner_user_id,
+            title="New booking",
+            body=f"{payload.patient_name} booked token #{token_number} with {doctor.full_name} "
+            f"for {payload.appointment_date}.",
+            notification_type=NotificationType.BOOKING,
+            related_booking_id=booking.id,
+        )
+    except Exception:  # noqa: BLE001
+        logging.getLogger("bookings.service").exception("failed to create in-app notification for booking")
+
     qr_base64 = _generate_qr_base64(qr_uuid, signature)
     return booking, qr_base64
 
@@ -135,6 +162,15 @@ async def get_booking(db: AsyncSession, booking_id: uuid.UUID) -> Booking:
     if not booking:
         raise NotFoundError("Booking not found")
     return booking
+
+
+async def get_booking_receipt(db: AsyncSession, booking_id: uuid.UUID) -> tuple[Booking, str]:
+    """Re-derives the same QR PNG shown at booking time (deterministic from
+    the stored qr_uuid + qr_signature) so a receipt/invoice view can be
+    reopened or reprinted any time, not just right after booking."""
+    booking = await get_booking(db, booking_id)
+    qr_base64 = _generate_qr_base64(booking.qr_uuid, booking.qr_signature)
+    return booking, qr_base64
 
 
 async def get_booking_by_qr(db: AsyncSession, qr_uuid: uuid.UUID, signature: str) -> Booking:
@@ -213,5 +249,18 @@ async def cancel_booking(
     if refund_points > 0:
         note = "Facility-fault grace refund (queue delay)" if facility_fault else "Cancellation refund"
         await credit_reward_points(db, booking.patient_id, refund_points, booking.id, note)
+
+    try:
+        await create_notification(
+            db,
+            booking.patient_id,
+            title="Booking cancelled",
+            body=f"Token #{booking.token_number} on {booking.appointment_date} was cancelled."
+            + (f" {refund_points} reward points credited." if refund_points > 0 else ""),
+            notification_type=NotificationType.BOOKING,
+            related_booking_id=booking.id,
+        )
+    except Exception:  # noqa: BLE001
+        logging.getLogger("bookings.service").exception("failed to create in-app notification for cancellation")
 
     return booking, refund_points, deduction_percent

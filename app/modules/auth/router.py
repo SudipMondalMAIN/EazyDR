@@ -25,8 +25,9 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserOut, status_code=201)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    # An email OTP is sent automatically on register; call
-    # /auth/otp/verify-signup to confirm the address.
+    # An email OTP is sent automatically on register. The account exists
+    # but is NOT usable yet (login/login-otp are blocked) until the client
+    # calls /auth/otp/verify-signup with the code the user received.
     user = await service.register_user(db, payload)
     return user
 
@@ -37,8 +38,9 @@ async def request_otp(payload: RequestOTPRequest):
     await otp_service.request_otp(payload.email, payload.purpose)
 
 
-@router.post("/otp/verify-signup", response_model=UserOut)
+@router.post("/otp/verify-signup", response_model=TokenResponse)
 async def verify_signup_otp(payload: VerifySignupOTPRequest, db: AsyncSession = Depends(get_db)):
+    """Confirms the signup OTP and logs the user in (returns tokens)."""
     return await service.verify_signup_otp(db, payload.email, payload.otp)
 
 

@@ -22,6 +22,11 @@ async def create_facility(db: AsyncSession, owner_user_id: uuid.UUID, payload: F
     return facility
 
 
+async def list_facilities_for_owner(db: AsyncSession, owner_user_id: uuid.UUID) -> list[Facility]:
+    result = await db.execute(select(Facility).where(Facility.owner_user_id == owner_user_id))
+    return list(result.scalars().all())
+
+
 async def get_facility(db: AsyncSession, facility_id: uuid.UUID) -> Facility:
     result = await db.execute(select(Facility).where(Facility.id == facility_id))
     facility = result.scalar_one_or_none()
@@ -109,6 +114,23 @@ async def list_doctors_for_facility(db: AsyncSession, facility_id: uuid.UUID) ->
         select(Doctor).where(Doctor.facility_id == facility_id, Doctor.is_active == True)  # noqa: E712
     )
     return list(result.scalars().all())
+
+
+async def list_doctors_for_facility_admin(db: AsyncSession, facility_id: uuid.UUID) -> list[Doctor]:
+    """Admin view — includes inactive/deactivated doctors too, unlike the
+    public listing above."""
+    result = await db.execute(select(Doctor).where(Doctor.facility_id == facility_id))
+    return list(result.scalars().all())
+
+
+async def update_doctor(db: AsyncSession, doctor_id: uuid.UUID, updates: dict) -> Doctor:
+    doctor = await get_doctor(db, doctor_id)
+    for field, value in updates.items():
+        if value is not None:
+            setattr(doctor, field, value)
+    await db.commit()
+    await db.refresh(doctor)
+    return doctor
 
 
 async def set_availability(db: AsyncSession, doctor_id: uuid.UUID, payload: AvailabilitySlotCreate) -> DoctorAvailability:

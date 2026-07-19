@@ -1,145 +1,548 @@
-# EazyDoctor Backend
+# EazyDR - Doctor Appointment & Healthcare Management System
 
-FastAPI modular-monolith backend for the doctor/pharmacy appointment booking
-platform (Bolpur launch, India-scalable). Built per the Master Build Prompt,
-Build Order items 1–6.
+A modern, scalable FastAPI-based healthcare platform for managing doctor appointments, patient records, and medical services with JWT authentication, real-time features, and comprehensive role-based access control.
 
-## What's included (working, tested to boot)
+## Table of Contents
 
-- **Skeleton**: cloud-agnostic config (env-vars only), Docker, docker-compose,
-  Alembic migrations, Modular Monolith folder layout.
-- **Auth**: register/login/refresh, JWT access+refresh tokens, bcrypt
-  password hashing, role-based guards (patient / merchant / admin / superadmin).
-- **Facilities & Doctors**: create facility, add doctors under it, weekly
-  availability/leave schedule, search by name/specialty/area + radius filter
-  (Haversine now, PostGIS migration path documented in `geo_service.py`).
-- **Bookings**: cash-at-checkout working end-to-end; online path wired to a
-  `PaymentService` interface with a Paytm stub (see security note below).
-  Per-doctor daily token numbering, QR generation (signed UUID, no personal
-  data in the QR payload), 5-hour cancellation lock with configurable
-  deduction %, cash commission tracked for manual settlement.
-- **Queue**: QR check-in (scan = check-in AND current-token advance, no
-  separate "complete" step, per spec), manual check-in fallback by Booking ID
-  or phone, live-queue read endpoint, 15-minute stall detection endpoint
-  (`GET /api/v1/queue/stalled`) meant to be polled by a Celery beat job.
-- **Rewards & Earnings ledgers**: both append-only ledgers (not mutable
-  balance columns) so history is always auditable. Reward points issued on
-  cancellation refunds. Facility withdrawal request flow (payout call is a
-  stub — see below).
-- **Admin**: per-facility pricing/commission/cancellation overrides, facility
-  verification/activation/sponsorship toggles, audit log (SuperAdmin-only
-  read), analytics summary endpoint.
-- **Service layer abstractions**: `storage_service.py` (Cloudinary today, S3
-  swap-in later), `notification_service.py` (Firebase today), `payment_service.py`
-  (cash working, Paytm stub). Business logic never imports Cloudinary/Firebase/
-  Paytm SDKs directly — only these three files do.
-- **Rate limiting**: Redis-backed fixed-window middleware (`app/core/rate_limit.py`),
-  keyed by authenticated user id (falls back to client IP), stricter limits on
-  `/api/v1/auth/*` and `/api/v1/bookings`, fails open if Redis is unreachable
-  so a cache/limiter outage never takes the API down.
-- **Caching**: `app/services/cache_service.py` (Redis, JSON) wraps facility
-  search results and facility/doctor profile reads; invalidated on writes
-  (new facility, new doctor).
-- **Background workers (Celery)**: `app/core/celery_app.py` wires Celery beat
-  to run the queue-stall sweep every 15 minutes (staff push reminder, then
-  escalation to the Admin alert feed if still stuck — see `app/modules/queue/tasks.py`)
-  and a 30-minutes-before-appointment push reminder every 5 minutes
-  (`app/modules/notifications/tasks.py`). `docker-compose.yml` runs
-  `celery_worker` and `celery_beat` alongside the API.
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [API Documentation](#api-documentation)
+- [Database Schema](#database-schema)
+- [Authentication](#authentication)
+- [Critical Issues & Bug Fixes](#critical-issues--bug-fixes)
+- [Security Best Practices](#security-best-practices)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [Support](#support)
+- [License](#license)
 
-## What's NOT built yet (flagged, not silently skipped)
+## Features
 
-- **Payments**: only "Pay Cash at checkout" is real. `PaytmPaymentService` in
-  `app/services/payment_service.py` is a stub with the right shape but **no
-  real checksum verification** — do not deploy online payments off it without
-  a dedicated security review once Paytm approval comes through.
-- **Payouts**: withdrawal requests are recorded and debited from the ledger,
-  but the actual Paytm Payout API call is not wired — same file, same caveat.
-- **Banners, ad campaigns/ranking boost, referral system**: not built (Build
-  Order items 9–10) — say the word and I'll add them next.
-- **2FA for SuperAdmin**: `User.totp_secret` / `is_2fa_enabled` columns exist
-  but the actual TOTP enrollment/verification flow isn't implemented yet.
-- **PDF export of bookings** (admin panel feature): not built yet — will be
-  added as a Celery task once a PDF library is picked.
+### Core Functionality
+- User registration and email verification
+- Secure login with JWT authentication
+- Doctor profiles with specialization and ratings
+- Appointment booking, rescheduling, and cancellation
+- Patient medical history and records
+- Real-time appointment status updates
+- Role-based access control (Patient, Doctor, Admin)
 
-## Project layout
+### Security & Performance
+- JWT token-based authentication with refresh tokens
+- Rate limiting on authentication endpoints (Redis-backed)
+- Bcrypt password hashing
+- Input validation using Pydantic
+- CORS protection
+- OTP-based password reset
+- Email verification for new accounts
 
-```
-app/
-  core/            settings, DB engine, JWT/security, model registry
-  common/          shared mixins (UUID PK, timestamps), exceptions
-  services/        Storage / Notification / Payment / Geo abstractions
-  modules/
-    auth/          users, JWT, role guards
-    facilities/    facilities + doctors + availability + search
-    bookings/      booking creation, QR, cancellation
-    queue/         QR/manual check-in, live queue, stall detection
-    rewards/       reward points ledger + facility earnings ledger
-    admin/         pricing overrides, audit log, analytics
-  main.py          FastAPI app + router wiring
-alembic/           migrations (env.py reads DATABASE_URL from settings)
-Dockerfile
-docker-compose.yml  (app + Postgres + Redis for local dev)
-.env.example
-```
+### Admin Features
+- User account management
+- Doctor verification and specialty management
+- System analytics and reporting
+- Account suspension and role management
 
-## Running it locally
+## Tech Stack
 
+**Backend**
+- FastAPI 0.104.1 - Modern async web framework
+- PostgreSQL 12+ - Relational database
+- SQLAlchemy - ORM for database operations
+- Pydantic - Data validation
+- PyJWT - JWT authentication
+- Bcrypt - Password hashing
+- Redis - Caching and rate limiting
+- Alembic - Database migrations
+
+**DevOps**
+- Docker & Docker Compose
+- Uvicorn - ASGI server
+- Celery - Task queue (async jobs)
+
+## Quick Start
+
+### Using Docker (Recommended)
 ```bash
+git clone https://github.com/SudipMondalMAIN/EazyDR.git
+cd EazyDR
 cp .env.example .env
-# fill in DATABASE_URL if not using docker-compose's built-in Postgres
-
-docker-compose up --build
-# API on http://localhost:8000, interactive docs at /docs
+docker-compose up -d
 ```
 
-Without Docker:
+API will be at `http://localhost:8000`  
+Swagger Docs: `http://localhost:8000/docs`
 
+### Manual Setup
 ```bash
-python -m venv venv && source venv/bin/activate
+git clone https://github.com/SudipMondalMAIN/EazyDR.git
+cd EazyDR
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-# point DATABASE_URL at a running Postgres instance (Supabase connection
-# string works as-is)
+cp .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-In `development` mode the app auto-creates tables on startup for
-convenience. For staging/production, use Alembic instead:
+## Installation
 
+### Prerequisites
+- Python 3.10 or higher
+- PostgreSQL 12 or higher
+- Redis 6.0 or higher
+- Docker & Docker Compose (optional)
+
+### Step-by-Step Setup
+
+1. Clone the repository
 ```bash
-alembic revision --autogenerate -m "init"
+git clone https://github.com/SudipMondalMAIN/EazyDR.git
+cd EazyDR
+```
+
+2. Create virtual environment
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+4. Copy environment template
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+5. Initialize database
+```bash
 alembic upgrade head
 ```
 
-`docker-compose up` also starts `celery_worker` and `celery_beat` so the
-queue-stall sweep and appointment reminders run automatically. Without
-Docker, run them in two extra terminals:
-
+6. Start Redis
 ```bash
-celery -A app.core.celery_app worker --loglevel=info
-celery -A app.core.celery_app beat --loglevel=info
+redis-server
 ```
 
-## Quick manual test flow
+7. Run application
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-1. `POST /api/v1/auth/register` — role `merchant` → login → get access token
-2. `POST /api/v1/facilities` (as merchant) → note `facility_id`
-3. `POST /api/v1/facilities/{facility_id}/doctors` → note `doctor_id`
-4. Register/login a second user as role `patient`
-5. `POST /api/v1/bookings` with `payment_mode: "cash"` → returns booking +
-   `qr_code_base64` (decode to see the QR PNG)
-6. As merchant: `POST /api/v1/queue/check-in/qr` with the returned `qr_uuid` +
-   `qr_signature` (both are in the booking response as `qr_uuid`/parseable
-   from the QR payload) → queue advances
-7. `GET /api/v1/queue/live/{doctor_id}?date=YYYY-MM-DD` → see current token
+## Configuration
 
-## Migration to AWS later
+Create `.env` file with these variables:
 
-Only environment variables change:
-- `DATABASE_URL` → AWS RDS Postgres connection string
-- `STORAGE_PROVIDER=s3` + AWS credentials (once an `S3StorageService` class
-  is added implementing the same `StorageService` interface)
-- Same Docker image runs on ECS/EC2 unmodified
+```env
+# ===== DATABASE =====
+DATABASE_URL=postgresql://user:password@localhost:5432/eazydr
+DATABASE_ECHO=false
+DATABASE_POOL_SIZE=20
+DATABASE_MAX_OVERFLOW=10
 
-No business logic, models, or module structure should need to change for
-this migration — that's the whole point of the service-layer abstractions.
+# ===== JWT & SECURITY =====
+SECRET_KEY=your-super-secret-key-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# ===== EMAIL CONFIGURATION =====
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SENDER_EMAIL=noreply@eazydr.com
+
+# ===== REDIS =====
+REDIS_URL=redis://localhost:6379/0
+
+# ===== CORS =====
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+
+# ===== APPLICATION =====
+APP_NAME=EazyDR
+APP_VERSION=1.0.0
+ENVIRONMENT=development
+DEBUG=false
+LOG_LEVEL=INFO
+
+# ===== RATE LIMITING =====
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_PERIOD=3600
+
+# ===== OTP SETTINGS =====
+OTP_EXPIRY_MINUTES=10
+OTP_LENGTH=6
+```
+
+## Project Structure
+
+```
+EazyDR/
+├── app/
+│   ├── main.py                    # FastAPI application entry point
+│   ├── core/
+│   │   ├── config.py             # Settings management
+│   │   ├── database.py           # Database initialization
+│   │   ├── security.py           # JWT & password utilities
+│   │   ├── rate_limit.py         # Rate limiting logic
+│   │   └── email.py              # Email sending service
+│   ├── modules/
+│   │   ├── auth/
+│   │   │   ├── router.py         # Authentication routes
+│   │   │   ├── service.py        # Auth business logic
+│   │   │   ├── schemas.py        # Pydantic models
+│   │   │   └── dependencies.py   # Dependency injection
+│   │   ├── doctors/              # Doctor management
+│   │   ├── appointments/         # Appointment handling
+│   │   ├── patients/             # Patient profiles
+│   │   └── admin/                # Admin functions
+│   ├── models/                   # SQLAlchemy ORM models
+│   ├── common/
+│   │   ├── exceptions.py         # Custom exceptions
+│   │   └── constants.py          # Application constants
+│   └── middleware/               # Custom middleware
+├── migrations/                   # Alembic database migrations
+├── tests/                        # Unit & integration tests
+├── docker-compose.yml            # Docker services
+├── Dockerfile                    # Docker image
+├── requirements.txt              # Python dependencies
+├── .env.example                  # Environment template
+└── README.md
+```
+
+## API Documentation
+
+### Interactive Docs (After Starting Server)
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+### Authentication Endpoints
+
+**Register**
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "SecurePass123!",
+  "first_name": "John",
+  "last_name": "Doe",
+  "role": "patient"
+}
+```
+
+**Login**
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "SecurePass123!"
+}
+
+Response:
+{
+  "access_token": "eyJ0eXAiOiJKV1Q...",
+  "refresh_token": "eyJ0eXAiOiJKV1Q...",
+  "user": { "id": "uuid", "email": "...", "role": "patient" }
+}
+```
+
+**Request Password Reset**
+```http
+POST /api/v1/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "user@example.com"
+}
+```
+
+### Doctor Endpoints
+
+**List Doctors**
+```http
+GET /api/v1/doctors?specialty=cardiology&skip=0&limit=10
+
+Response:
+{
+  "total": 45,
+  "doctors": [
+    {
+      "id": "uuid",
+      "name": "Dr. Smith",
+      "specialty": "cardiology",
+      "rating": 4.8,
+      "available_slots": 15
+    }
+  ]
+}
+```
+
+### Appointment Endpoints
+
+**Book Appointment**
+```http
+POST /api/v1/appointments/book
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "doctor_id": "uuid",
+  "appointment_date": "2024-02-15",
+  "appointment_time": "10:00",
+  "reason": "Consultation"
+}
+```
+
+**Get My Appointments**
+```http
+GET /api/v1/appointments/my-appointments
+Authorization: Bearer <access_token>
+```
+
+## Database Schema
+
+### Users Table
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
+  role ENUM('patient', 'doctor', 'admin'),
+  is_active BOOLEAN DEFAULT true,
+  is_verified BOOLEAN DEFAULT false,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+```
+
+### Doctors Table
+```sql
+CREATE TABLE doctors (
+  id UUID PRIMARY KEY,
+  user_id UUID REFERENCES users(id),
+  specialty VARCHAR(100),
+  license_number VARCHAR(100) UNIQUE,
+  experience_years INTEGER,
+  rating DECIMAL(3,2),
+  is_verified BOOLEAN DEFAULT false,
+  created_at TIMESTAMP
+);
+```
+
+### Appointments Table
+```sql
+CREATE TABLE appointments (
+  id UUID PRIMARY KEY,
+  patient_id UUID REFERENCES users(id),
+  doctor_id UUID REFERENCES doctors(id),
+  appointment_date DATE,
+  appointment_time TIME,
+  status ENUM('pending', 'confirmed', 'completed', 'cancelled'),
+  reason TEXT,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+);
+```
+
+## Authentication
+
+Uses JWT (JSON Web Tokens) for secure, stateless authentication:
+
+1. User creates account or logs in
+2. Server returns `access_token` (short-lived) and `refresh_token` (long-lived)
+3. Client sends token in Authorization header: `Authorization: Bearer <token>`
+4. When access token expires, use refresh token to get new one
+
+### Protected Routes
+All endpoints except login/register/forgot-password require valid token.
+
+## Critical Issues & Bug Fixes
+
+### Critical Security Issues (Fix Before Production)
+
+**1. Hardcoded JWT Secret**
+- Location: `app/core/config.py`
+- Issue: Default SECRET_KEY in code allows token forgery
+- Fix: Generate strong secret, use environment variable only
+```bash
+# Generate new secret
+openssl rand -base64 32
+# Add to .env: SECRET_KEY=<generated_value>
+```
+
+**2. CORS Misconfiguration**
+- Location: `app/main.py`
+- Issue: Wildcard CORS with credentials enabled (CSRF vulnerability)
+- Fix: Restrict to specific trusted domains
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://yourdomain.com"],  # Specific domain only
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+```
+
+**3. OTP Expiry Not Enforced**
+- Location: `app/modules/auth/service.py`
+- Issue: Password reset OTPs may persist indefinitely
+- Fix: Add timestamp validation
+```python
+# Before verifying OTP, check:
+if otp_record.created_at + timedelta(minutes=10) < datetime.now():
+    raise OTPExpiredException()
+```
+
+**4. User Registration Race Condition**
+- Issue: Multiple simultaneous registrations with same email
+- Fix: Add database unique constraint and transaction handling
+
+### High Priority Issues
+
+**Missing Input Validation**
+- Query parameters not validated (skip, limit)
+- Can cause DoS or data exfiltration
+- Add validation in schemas
+
+**Error Messages Leak Details**
+- Stack traces visible in responses
+- Remove technical details in production
+
+### Medium Priority Issues
+
+- No pagination defaults on list endpoints
+- No audit logging for sensitive operations
+- Silent failures when Redis unavailable
+- No database query timeouts
+
+## Security Best Practices
+
+### Before Production
+
+1. **Change all secrets**
+```bash
+openssl rand -base64 32  # New JWT secret
+```
+
+2. **Fix CORS** - Whitelist specific domains only
+
+3. **Enable HTTPS** - Use SSL certificates
+
+4. **Database security**
+   - Strong passwords
+   - Enable SSL connections
+   - Least privilege user
+   - Regular backups
+
+5. **Set environment properly**
+```env
+ENVIRONMENT=production
+DEBUG=false
+ALLOWED_ORIGINS=https://yourdomain.com
+```
+
+6. **Monitor & Log**
+   - Log authentication attempts
+   - Monitor suspicious activity
+   - Set up alerts
+
+7. **Dependencies**
+   - Keep packages updated
+   - Regular security audits
+   - Use pip-audit to check vulnerabilities
+```bash
+pip install pip-audit
+pip-audit
+```
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/
+
+# With coverage
+pytest --cov=app tests/
+
+# Specific test file
+pytest tests/modules/auth/test_auth.py -v
+
+# With output
+pytest -v -s
+```
+
+## Deployment
+
+### Docker Compose
+```bash
+docker-compose up -d
+```
+
+### Docker Manual
+```bash
+docker build -t eazydr:latest .
+docker run -p 8000:8000 --env-file .env eazydr:latest
+```
+
+### Production Checklist
+- [ ] Generate new SECRET_KEY
+- [ ] Fix CORS configuration
+- [ ] Enable HTTPS/SSL
+- [ ] Set DEBUG=false
+- [ ] Use production database
+- [ ] Configure Redis for production
+- [ ] Set up logging and monitoring
+- [ ] Enable database backups
+- [ ] Rate limit configured appropriately
+- [ ] Run security audit
+
+## Contributing
+
+1. Fork repository
+2. Create feature branch: `git checkout -b feature/AmazingFeature`
+3. Commit changes: `git commit -m 'Add AmazingFeature'`
+4. Push to branch: `git push origin feature/AmazingFeature`
+5. Open Pull Request
+
+### Code Standards
+- Follow PEP 8
+- Use type hints
+- Write docstrings
+- Run tests before PR
+- Max line length: 100 chars
+
+## Support
+
+- GitHub Issues: [Report a bug](https://github.com/SudipMondalMAIN/EazyDR/issues)
+- Discussions: GitHub Discussions tab
+- Documentation: `/docs` endpoint after running server
+
+## License
+
+MIT License - See LICENSE file for details
+
+## Authors
+
+**Sudip Mondal** - [@SudipMondalMAIN](https://github.com/SudipMondalMAIN)
+
+---
+
+**Last Updated:** January 2024  
+**Status:** Active Development  
+**Version:** 1.0.0

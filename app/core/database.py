@@ -2,6 +2,7 @@
 Database engine/session setup. Postgres-only, provider-agnostic.
 Swapping Supabase -> AWS RDS later requires changing only DATABASE_URL.
 """
+import uuid
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -18,6 +19,18 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     echo=False,
+    # PgBouncer in transaction/statement pooling mode does not support
+    # asyncpg's server-side prepared statement cache. Disabling the cache
+    # alone isn't enough — SQLAlchemy's asyncpg dialect still issues a
+    # prepared statement during connection setup (JSON codec registration)
+    # using a fixed default name, which collides across pooled backend
+    # connections. Giving each prepare() call a random unique name avoids
+    # that collision entirely.
+    connect_args={
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid.uuid4()}__",
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(

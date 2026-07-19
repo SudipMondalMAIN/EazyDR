@@ -36,7 +36,7 @@ class BookingOut(BaseModel):
 
 
 class BookingWithQrOut(BookingOut):
-    qr_code_base64: str
+    qr_code_base64: str = ""
 
 
 class CancelBookingRequest(BaseModel):

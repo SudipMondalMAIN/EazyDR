@@ -14,6 +14,8 @@ from app.core.celery_app import celery_app
 from app.core.database import AsyncSessionLocal
 from app.modules.auth.models import User
 from app.modules.bookings.models import Booking, BookingStatus
+from app.modules.notifications.models import NotificationType
+from app.modules.notifications.service import create_notification
 from app.services.notification_service import notification_service
 
 logger = logging.getLogger("notifications.tasks")
@@ -52,13 +54,25 @@ async def _send_appointment_reminders() -> dict:
             user_result = await db.execute(select(User).where(User.id == booking.patient_id))
             patient = user_result.scalar_one_or_none()
 
+            reminder_body = (
+                f"Your appointment (token #{booking.token_number}) is at "
+                f"{booking.expected_time} today. See you soon!"
+            )
             if patient and patient.device_push_token:
                 await notification_service.send_push(
                     device_token=patient.device_push_token,
                     title="Upcoming appointment",
-                    body=f"Your appointment (token #{booking.token_number}) is at "
-                    f"{booking.expected_time} today. See you soon!",
+                    body=reminder_body,
                     data={"booking_id": str(booking.id)},
+                )
+            if patient:
+                await create_notification(
+                    db,
+                    patient.id,
+                    title="Upcoming appointment",
+                    body=reminder_body,
+                    notification_type=NotificationType.QUEUE,
+                    related_booking_id=booking.id,
                 )
 
             booking.reminder_sent = True

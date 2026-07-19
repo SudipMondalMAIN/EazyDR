@@ -4,21 +4,24 @@ other modules — nothing outside this file should touch jose/passlib directly.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
-
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-
 from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+def _truncate_password(password: str) -> str:
+    """bcrypt only supports up to 72 bytes; truncate safely on byte boundary."""
+    return password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_truncate_password(password))
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(_truncate_password(plain), hashed)
 
 
 def _create_token(subject: str, extra: dict[str, Any], expires_delta: timedelta) -> str:

@@ -12,8 +12,11 @@ from app.modules.auth.router import router as auth_router
 from app.modules.banners.router import router as banners_router
 from app.modules.bookings.router import router as bookings_router
 from app.modules.facilities.router import router as facilities_router
+from app.modules.favorites.router import router as favorites_router
+from app.modules.notifications.router import router as notifications_router
 from app.modules.queue.router import router as queue_router
 from app.modules.rewards.router import router as rewards_router
+from app.modules.reviews.router import router as reviews_router
 from app.modules.settlements.router import router as settlements_router
 
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +47,9 @@ app.include_router(rewards_router)
 app.include_router(settlements_router)
 app.include_router(admin_router)
 app.include_router(banners_router)
+app.include_router(reviews_router)
+app.include_router(favorites_router)
+app.include_router(notifications_router)
 
 
 @app.on_event("startup")

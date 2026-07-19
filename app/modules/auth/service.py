@@ -15,27 +15,60 @@ from app.services import otp_service
 
 
 async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
-    existing = await db.execute(select(User).where(User.phone == payload.phone))
-    if existing.scalar_one_or_none():
-        raise ConflictError("Phone number already registered")
-
-    existing_email = await db.execute(select(User).where(User.email == payload.email))
-    if existing_email.scalar_one_or_none():
-        raise ConflictError("Email already registered")
-
     if payload.role in (UserRole.ADMIN, UserRole.SUPERADMIN):
         # Admin accounts must be created by an existing SuperAdmin via the
         # admin module, never via public self-registration.
         raise BadRequestError("Admin accounts cannot self-register")
 
-    user = User(
-        full_name=payload.full_name,
-        phone=payload.phone,
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-        role=payload.role,
-    )
-    db.add(user)
+    existing_phone = (
+        await db.execute(select(User).where(User.phone == payload.phone))
+    ).scalar_one_or_none()
+    existing_email = (
+        await db.execute(select(User).where(User.email == payload.email))
+    ).scalar_one_or_none()
+
+    # A row that matches on phone or email but was never OTP-verified isn't
+    # a "real" account yet — most likely the same person abandoned the
+    # signup flow before entering the OTP (closed the tab, hit back, etc).
+    # Block only if it's the SAME unverified row on both fields; a genuine
+    # conflict (phone taken by one unverified row, email by a different
+    # one) still needs to be rejected so we don't silently merge accounts.
+    stale_user = None
+    if existing_phone and existing_email:
+        if existing_phone.id == existing_email.id and not existing_phone.is_email_verified:
+            stale_user = existing_phone
+        elif existing_phone.is_email_verified or existing_email.is_email_verified:
+            raise ConflictError("Phone number or email already registered")
+        elif existing_phone.id != existing_email.id:
+            raise ConflictError("Phone number or email already registered")
+    elif existing_phone:
+        if existing_phone.is_email_verified:
+            raise ConflictError("Phone number already registered")
+        stale_user = existing_phone
+    elif existing_email:
+        if existing_email.is_email_verified:
+            raise ConflictError("Email already registered")
+        stale_user = existing_email
+
+    if stale_user:
+        # Resume signup: overwrite the abandoned row with the latest
+        # details/password the user just submitted and send a fresh OTP.
+        stale_user.full_name = payload.full_name
+        stale_user.phone = payload.phone
+        stale_user.email = payload.email
+        stale_user.password_hash = hash_password(payload.password)
+        stale_user.role = payload.role
+        user = stale_user
+    else:
+        user = User(
+            full_name=payload.full_name,
+            phone=payload.phone,
+            email=payload.email,
+            password_hash=hash_password(payload.password),
+            role=payload.role,
+        )
+        db.add(user)
+
     await db.commit()
     await db.refresh(user)
 
@@ -45,7 +78,7 @@ async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
     return user
 
 
-async def verify_signup_otp(db: AsyncSession, email: str, otp: str) -> User:
+async def verify_signup_otp(db: AsyncSession, email: str, otp: str) -> TokenResponse:
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if not user:
@@ -56,7 +89,7 @@ async def verify_signup_otp(db: AsyncSession, email: str, otp: str) -> User:
     user.is_email_verified = True
     await db.commit()
     await db.refresh(user)
-    return user
+    return issue_tokens(user)
 
 
 async def authenticate(db: AsyncSession, payload: LoginRequest) -> User:
@@ -66,6 +99,8 @@ async def authenticate(db: AsyncSession, payload: LoginRequest) -> User:
         raise UnauthorizedError("Invalid phone number or password")
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")
+    if not user.is_email_verified:
+        raise UnauthorizedError("Please verify your email with the OTP sent to it before logging in")
     return user
 
 
@@ -79,6 +114,8 @@ async def request_login_otp(db: AsyncSession, phone: str, password: str) -> str:
         raise UnauthorizedError("Invalid phone number or password")
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")
+    if not user.is_email_verified:
+        raise UnauthorizedError("Please verify your email with the OTP sent to it before logging in")
 
     await otp_service.request_otp(user.email, "login")
     return user.email
