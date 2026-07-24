@@ -120,6 +120,71 @@ async def check_in_manual(
     return booking
 
 
+async def start_consultation(db: AsyncSession, booking_id: uuid.UUID, merchant_user_id: uuid.UUID) -> Booking:
+    """Doctor/staff taps 'Start Consultation' once the patient is with the
+    doctor. Only valid from CHECKED_IN — moves the booking to IN_PROGRESS
+    and records the start time. Does not change the queue's current_token;
+    the patient is already the one being served."""
+    result = await db.execute(select(Booking).where(Booking.id == booking_id))
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise NotFoundError("Booking not found")
+    await verify_doctor_owner(db, booking.doctor_id, merchant_user_id)
+
+    if booking.status != BookingStatus.CHECKED_IN:
+        raise BadRequestError(
+            f"Consultation cannot be started from status '{booking.status.value}'"
+        )
+
+    booking.status = BookingStatus.IN_PROGRESS
+    booking.consultation_started_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(booking)
+    return booking
+
+
+async def complete_consultation(db: AsyncSession, booking_id: uuid.UUID, merchant_user_id: uuid.UUID) -> Booking:
+    """Doctor/staff taps 'Complete Consultation'. Only valid from
+    IN_PROGRESS — marks the booking COMPLETED, records the completion
+    time, removes the patient from the active queue, and pushes a live
+    queue refresh so the waiting-room screen updates automatically."""
+    result = await db.execute(select(Booking).where(Booking.id == booking_id))
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise NotFoundError("Booking not found")
+    await verify_doctor_owner(db, booking.doctor_id, merchant_user_id)
+
+    if booking.status != BookingStatus.IN_PROGRESS:
+        raise BadRequestError(
+            f"Consultation cannot be completed from status '{booking.status.value}'"
+        )
+
+    now = datetime.now(timezone.utc)
+    booking.status = BookingStatus.COMPLETED
+    booking.consultation_completed_at = now
+    await db.commit()
+    await db.refresh(booking)
+
+    # Removes this patient from the active queue and refreshes the live
+    # queue for anyone watching (waiting-room screen, staff dashboard).
+    state = await _get_or_create_queue_state(db, booking.doctor_id, booking.appointment_date)
+    state.last_advanced_at = now
+    await db.commit()
+    await db.refresh(state)
+
+    await notification_service.push_queue_update(
+        str(booking.facility_id),
+        str(booking.doctor_id),
+        {
+            "current_token": state.current_token,
+            "updated_at": now.isoformat(),
+            "booking_id": str(booking.id),
+            "completed_booking_id": str(booking.id),
+        },
+    )
+    return booking
+
+
 async def get_live_queue(db: AsyncSession, doctor_id: uuid.UUID, queue_date: str) -> tuple[int, bool]:
     state = await _get_or_create_queue_state(db, doctor_id, queue_date)
     is_stalled = False

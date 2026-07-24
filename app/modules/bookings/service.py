@@ -215,7 +215,12 @@ async def cancel_booking(
       facility_fault=True (used by the queue-delay grace-refund fallback,
       which is allowed to bypass the lock since the delay isn't the
       patient's doing — see spec section 5)."""
-    if booking.status in (BookingStatus.CANCELLED, BookingStatus.COMPLETED, BookingStatus.CHECKED_IN):
+    if booking.status in (
+        BookingStatus.CANCELLED,
+        BookingStatus.COMPLETED,
+        BookingStatus.CHECKED_IN,
+        BookingStatus.IN_PROGRESS,
+    ):
         raise ConflictError(f"Booking cannot be cancelled from status '{booking.status.value}'")
 
     now = datetime.now(timezone.utc)

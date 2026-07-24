@@ -24,6 +24,15 @@ class CheckInResult(BaseModel):
     checked_in_at: str
 
 
+class ConsultationResult(BaseModel):
+    booking_id: uuid.UUID
+    doctor_id: uuid.UUID
+    token_number: int
+    status: str
+    consultation_started_at: str | None = None
+    consultation_completed_at: str | None = None
+
+
 class LiveQueueOut(BaseModel):
     doctor_id: uuid.UUID
     queue_date: str

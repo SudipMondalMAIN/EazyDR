@@ -7,7 +7,13 @@ from app.core.database import get_db
 from app.modules.auth.dependencies import require_admin, require_merchant
 from app.modules.auth.models import User
 from app.modules.queue import service
-from app.modules.queue.schemas import CheckInResult, LiveQueueOut, ManualCheckInRequest, QrCheckInRequest
+from app.modules.queue.schemas import (
+    CheckInResult,
+    ConsultationResult,
+    LiveQueueOut,
+    ManualCheckInRequest,
+    QrCheckInRequest,
+)
 
 router = APIRouter(prefix="/api/v1/queue", tags=["queue"])
 
@@ -41,6 +47,42 @@ async def check_in_manual(
         token_number=booking.token_number,
         status=booking.status.value,
         checked_in_at=booking.checked_in_at.isoformat(),
+    )
+
+
+@router.post("/consultation/{booking_id}/start", response_model=ConsultationResult)
+async def start_consultation(
+    booking_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_merchant)
+):
+    booking = await service.start_consultation(db, booking_id, user.id)
+    return ConsultationResult(
+        booking_id=booking.id,
+        doctor_id=booking.doctor_id,
+        token_number=booking.token_number,
+        status=booking.status.value,
+        consultation_started_at=booking.consultation_started_at.isoformat()
+        if booking.consultation_started_at
+        else None,
+        consultation_completed_at=None,
+    )
+
+
+@router.post("/consultation/{booking_id}/complete", response_model=ConsultationResult)
+async def complete_consultation(
+    booking_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_merchant)
+):
+    booking = await service.complete_consultation(db, booking_id, user.id)
+    return ConsultationResult(
+        booking_id=booking.id,
+        doctor_id=booking.doctor_id,
+        token_number=booking.token_number,
+        status=booking.status.value,
+        consultation_started_at=booking.consultation_started_at.isoformat()
+        if booking.consultation_started_at
+        else None,
+        consultation_completed_at=booking.consultation_completed_at.isoformat()
+        if booking.consultation_completed_at
+        else None,
     )
 
 

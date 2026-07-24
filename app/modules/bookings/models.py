@@ -13,8 +13,9 @@ from app.core.database import Base
 class BookingStatus(str, enum.Enum):
     PENDING = "pending"              # created, awaiting payment or just cash-confirmed
     CONFIRMED = "confirmed"          # payment settled (or cash accepted) — QR is live
-    CHECKED_IN = "checked_in"        # QR scanned at facility, "with doctor"
-    COMPLETED = "completed"          # implied once next patient scanned, or admin can force
+    CHECKED_IN = "checked_in"        # QR scanned at facility, waiting in queue
+    IN_PROGRESS = "in_progress"      # consultation started by the doctor/staff
+    COMPLETED = "completed"          # consultation finished (Complete Consultation), or admin can force
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
 
@@ -66,6 +67,8 @@ class Booking(Base, UUIDPKMixin, TimestampMixin):
     qr_signature: Mapped[str] = mapped_column(String(128))
 
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consultation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consultation_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancellation_refund_points: Mapped[int] = mapped_column(Integer, default=0)
 
