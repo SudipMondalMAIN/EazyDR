@@ -53,6 +53,8 @@ async def _next_token_number(db: AsyncSession, doctor_id: uuid.UUID, appointment
 
 async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: BookingCreate) -> tuple[Booking, str]:
     facility = await get_facility(db, payload.facility_id)
+    if not facility.is_active or not facility.is_verified:
+        raise BadRequestError("This facility is not currently accepting bookings")
     doctor = await get_doctor(db, payload.doctor_id)
     if doctor.facility_id != facility.id:
         raise BadRequestError("Doctor does not belong to this facility")

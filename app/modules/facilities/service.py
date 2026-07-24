@@ -75,7 +75,7 @@ async def search_facilities(db: AsyncSession, params: FacilitySearchParams) -> l
     name/specialty, filtered by radius if lat/lng given. At current
     Bolpur-launch scale this filters in Python; see geo_service.py for the
     PostGIS migration note for when facility count grows large."""
-    stmt = select(Facility).where(Facility.is_active == True)  # noqa: E712
+    stmt = select(Facility).where(Facility.is_active == True, Facility.is_verified == True)  # noqa: E712
 
     if params.city:
         stmt = stmt.where(Facility.city.ilike(f"%{params.city}%"))
