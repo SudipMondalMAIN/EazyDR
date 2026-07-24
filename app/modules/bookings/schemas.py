@@ -43,6 +43,10 @@ class CancelBookingRequest(BaseModel):
     reason: str | None = None
 
 
+class VerifyOnlinePaymentRequest(BaseModel):
+    gateway_response: dict = {}
+
+
 class CancelBookingResult(BaseModel):
     booking_id: uuid.UUID
     status: BookingStatus

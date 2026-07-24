@@ -58,6 +58,11 @@ class Booking(Base, UUIDPKMixin, TimestampMixin):
     # For cash bookings: commission owed to platform but not yet collected —
     # settled later via manual/periodic reconciliation with the facility.
     cash_commission_settled: Mapped[bool] = mapped_column(default=False)
+    # For online bookings: set once the gateway payment has been verified and
+    # the facility's share has been credited to their earnings ledger. Guards
+    # against crediting the same booking twice if the callback fires more
+    # than once (gateway retries) or verification is re-run.
+    online_payment_settled: Mapped[bool] = mapped_column(default=False)
 
     status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.PENDING, index=True)
 

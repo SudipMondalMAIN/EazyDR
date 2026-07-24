@@ -15,6 +15,7 @@ from app.modules.bookings.schemas import (
     BookingWithQrOut,
     CancelBookingRequest,
     CancelBookingResult,
+    VerifyOnlinePaymentRequest,
 )
 
 router = APIRouter(prefix="/api/v1/bookings", tags=["bookings"])
@@ -69,6 +70,23 @@ async def get_booking_receipt(
     out = BookingWithQrOut.model_validate(booking)
     out.qr_code_base64 = qr_base64
     return out
+
+
+@router.post("/{booking_id}/verify-payment", response_model=BookingOut)
+async def verify_online_payment(
+    booking_id: uuid.UUID,
+    payload: VerifyOnlinePaymentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Called after the gateway redirect/callback to verify an online
+    payment and settle the facility's share. Safe to call more than once —
+    already-settled bookings are returned unchanged (see
+    `service.confirm_online_payment`)."""
+    booking = await service.get_booking(db, booking_id)
+    if not (booking.patient_id == user.id or user.role in (UserRole.ADMIN, UserRole.SUPERADMIN)):
+        raise ForbiddenError("Not your booking")
+    return await service.confirm_online_payment(db, booking, payload.gateway_response)
 
 
 @router.post("/{booking_id}/cancel", response_model=CancelBookingResult)

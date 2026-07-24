@@ -156,6 +156,45 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
     return booking, qr_base64
 
 
+async def confirm_online_payment(db: AsyncSession, booking: Booking, gateway_response: dict) -> Booking:
+    """Verify an online (gateway) payment for a booking and settle it.
+
+    This is the online counterpart to the immediate cash-credit path in
+    `create_booking`: it must move the booking to CONFIRMED and credit the
+    facility's share to their earnings ledger, but ONLY once. Cash and
+    online transactions are kept on separate settlement flags
+    (`cash_commission_settled` vs `online_payment_settled`) and separate
+    ledger notes so the two payment paths never get mixed together in the
+    facility's earnings history or double-counted against each other.
+    """
+    if booking.payment_mode != PaymentMode.ONLINE:
+        raise BadRequestError("This booking was not paid online")
+
+    # Idempotency guard: prevent duplicate settlement if the gateway
+    # callback fires more than once, or verification is retried.
+    if booking.online_payment_settled:
+        return booking
+
+    if not booking.payment_transaction_ref:
+        raise BadRequestError("Booking has no payment transaction reference")
+
+    result = await payment_service.verify_payment(booking.payment_transaction_ref, gateway_response)
+    if not result.success:
+        raise BadRequestError("Online payment verification failed")
+
+    booking.online_payment_settled = True
+    if booking.status == BookingStatus.PENDING:
+        booking.status = BookingStatus.CONFIRMED
+
+    await credit_facility_earning(
+        db, booking.facility_id, booking.facility_earning_amount, booking.id, "Online booking — facility share"
+    )
+
+    await db.commit()
+    await db.refresh(booking)
+    return booking
+
+
 async def get_booking(db: AsyncSession, booking_id: uuid.UUID) -> Booking:
     result = await db.execute(select(Booking).where(Booking.id == booking_id))
     booking = result.scalar_one_or_none()
