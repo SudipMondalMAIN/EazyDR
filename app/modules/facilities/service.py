@@ -58,6 +58,18 @@ async def update_facility_photo(db: AsyncSession, facility_id: uuid.UUID, storag
     return facility
 
 
+async def update_facility(db: AsyncSession, facility_id: uuid.UUID, updates: dict) -> Facility:
+    """Patch-style update — only keys present in `updates` are applied
+    (dict should already be built with `exclude_unset=True` by the caller
+    so that intentionally-cleared fields, e.g. description="", still work)."""
+    facility = await get_facility(db, facility_id)  # raises NotFoundError if missing
+    for field, value in updates.items():
+        setattr(facility, field, value)
+    await db.commit()
+    await db.refresh(facility)
+    return facility
+
+
 async def search_facilities(db: AsyncSession, params: FacilitySearchParams) -> list[tuple[Facility, float | None]]:
     """Swiggy/Zomato-style search: text match on facility name/city + doctor
     name/specialty, filtered by radius if lat/lng given. At current

@@ -42,6 +42,13 @@ class Facility(Base, UUIDPKMixin, TimestampMixin):
     # Merchant-uploaded photo of the facility (pharmacy/nursing home/chamber).
     photo_storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # Editable profile fields (Task: Facility & Profile Management)
+    phone: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Free-text working hours, e.g. "Mon-Sat: 9:00 AM - 8:00 PM, Sun: Closed"
+    working_hours: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     doctors: Mapped[list["Doctor"]] = relationship(back_populates="facility", cascade="all, delete-orphan")
 
 

@@ -13,9 +13,11 @@ from app.modules.facilities.schemas import (
     AvailabilitySlotOut,
     DoctorCreate,
     DoctorOut,
+    DoctorUpdate,
     FacilityCreate,
     FacilityOut,
     FacilitySearchParams,
+    FacilityUpdate,
 )
 from app.services.cache_service import cache_service
 from app.services.storage_service import storage_service
@@ -95,6 +97,26 @@ async def get_facility(facility_id: uuid.UUID, db: AsyncSession = Depends(get_db
     return out
 
 
+@router.patch("/{facility_id}", response_model=FacilityOut)
+async def update_facility(
+    facility_id: uuid.UUID,
+    payload: FacilityUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    """Merchant self-service edit of their own facility profile: name,
+    address, city/state, phone, email, description, working hours,
+    location. Validation happens in FacilityUpdate; only owner may edit."""
+    await service.verify_facility_owner(db, facility_id, user.id)
+    updates = payload.model_dump(exclude_unset=True)
+    facility = await service.update_facility(db, facility_id, updates)
+    # Cached facility profile is now stale, and name/address/city changes
+    # can affect search result pages too.
+    await cache_service.delete(f"cache:facility:{facility_id}")
+    await cache_service.delete_prefix("cache:facility_search:")
+    return service.attach_facility_photo_url(facility)
+
+
 @router.post("/{facility_id}/photo", response_model=FacilityOut)
 async def upload_facility_photo(
     facility_id: uuid.UUID,
@@ -140,6 +162,24 @@ async def list_doctors(facility_id: uuid.UUID, db: AsyncSession = Depends(get_db
         cache_key, [item.model_dump(mode="json") for item in out], settings.cache_ttl_facility_profile
     )
     return out
+
+
+@router.patch("/doctors/{doctor_id}", response_model=DoctorOut)
+async def update_doctor_info(
+    doctor_id: uuid.UUID,
+    payload: DoctorUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    """Merchant self-service edit of a doctor under one of their own
+    facilities: name, qualification, specialty, consultation fee, active
+    status."""
+    doctor = await service.verify_doctor_owner(db, doctor_id, user.id)
+    updates = payload.model_dump(exclude_unset=True)
+    doctor = await service.update_doctor(db, doctor_id, updates)
+    await cache_service.delete(f"cache:facility:{doctor.facility_id}:doctors")
+    await cache_service.delete_prefix("cache:facility_search:")
+    return service.attach_doctor_photo_url(doctor)
 
 
 @router.post("/doctors/{doctor_id}/photo", response_model=DoctorOut)
