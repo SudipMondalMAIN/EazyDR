@@ -14,11 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.config import settings
+from app.modules.auth.models import User
 from app.modules.bookings.models import Booking, BookingStatus, PaymentMode
 from app.modules.bookings.schemas import BookingCreate
 from app.modules.facilities.service import get_doctor, get_facility
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
+from app.modules.notifications.tasks import send_transactional_email
 from app.modules.rewards.service import credit_facility_earning, credit_reward_points
 from app.services.payment_service import payment_service
 
@@ -149,6 +151,15 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
+        patient_result = await db.execute(select(User).where(User.id == patient_id))
+        patient = patient_result.scalar_one_or_none()
+        if patient and patient.email:
+            email_subject = "Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received"
+            email_body = (
+                f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
+                f"{payload.expected_time}."
+            )
+            send_transactional_email.delay(patient.email, email_subject, email_body)
     except Exception:  # noqa: BLE001
         logging.getLogger("bookings.service").exception("failed to create in-app notification for booking")
 
@@ -295,15 +306,22 @@ async def cancel_booking(
         await credit_reward_points(db, booking.patient_id, refund_points, booking.id, note)
 
     try:
+        cancellation_body = (
+            f"Token #{booking.token_number} on {booking.appointment_date} was cancelled."
+            + (f" {refund_points} reward points credited." if refund_points > 0 else "")
+        )
         await create_notification(
             db,
             booking.patient_id,
             title="Booking cancelled",
-            body=f"Token #{booking.token_number} on {booking.appointment_date} was cancelled."
-            + (f" {refund_points} reward points credited." if refund_points > 0 else ""),
+            body=cancellation_body,
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
+        patient_result = await db.execute(select(User).where(User.id == booking.patient_id))
+        patient = patient_result.scalar_one_or_none()
+        if patient and patient.email:
+            send_transactional_email.delay(patient.email, "Booking cancelled", cancellation_body)
     except Exception:  # noqa: BLE001
         logging.getLogger("bookings.service").exception("failed to create in-app notification for cancellation")
 

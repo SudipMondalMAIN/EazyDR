@@ -16,12 +16,47 @@ from app.modules.auth.models import User
 from app.modules.bookings.models import Booking, BookingStatus
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
+from app.services.email_service import send_notification_email
 from app.services.notification_service import notification_service
 
 logger = logging.getLogger("notifications.tasks")
 
 REMINDER_WINDOW_MINUTES = 30
 REMINDER_TOLERANCE_MINUTES = 5  # half the 5-min beat interval either side
+
+
+@celery_app.task(
+    bind=True,
+    name="app.modules.notifications.tasks.send_transactional_email",
+    max_retries=5,
+)
+def send_transactional_email(self, to_email: str, subject: str, message: str) -> bool:
+    """Sends a transactional email (booking confirmation/cancellation,
+    appointment reminder, etc.) with retries and failure logging.
+
+    Retries with exponential backoff on any failure (provider error or
+    exception). After the final attempt is exhausted, the failure is
+    logged so it can be investigated, rather than silently dropped.
+    """
+    try:
+        sent = asyncio.run(send_notification_email(to_email, subject, message))
+        if not sent:
+            raise RuntimeError("email provider reported failure")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        attempt = self.request.retries + 1
+        total_attempts = self.max_retries + 1
+        if self.request.retries >= self.max_retries:
+            logger.error(
+                "email permanently failed after %s attempts to=%s subject=%s error=%s",
+                total_attempts, to_email, subject, exc,
+            )
+            return False
+        logger.warning(
+            "email send attempt %s/%s failed to=%s subject=%s error=%s — retrying",
+            attempt, total_attempts, to_email, subject, exc,
+        )
+        raise self.retry(exc=exc, countdown=min(60 * (2 ** self.request.retries), 900))
 
 
 async def _send_appointment_reminders() -> dict:
@@ -64,6 +99,10 @@ async def _send_appointment_reminders() -> dict:
                     title="Upcoming appointment",
                     body=reminder_body,
                     data={"booking_id": str(booking.id)},
+                )
+            if patient and patient.email:
+                send_transactional_email.delay(
+                    patient.email, "Your appointment is in 30 minutes", reminder_body
                 )
             if patient:
                 await create_notification(
