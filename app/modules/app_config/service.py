@@ -13,10 +13,11 @@ from app.modules.app_config.schemas import (
 )
 
 DEFAULT_NAV_CONFIG = [
-    {"key": "home", "label": "Home", "icon": "home", "order": 0, "visible": True, "screen": "HomeScreen"},
-    {"key": "bookings", "label": "Bookings", "icon": "calendar", "order": 1, "visible": True, "screen": "BookingsScreen"},
-    {"key": "wallet", "label": "Wallet", "icon": "wallet", "order": 2, "visible": True, "screen": "WalletScreen"},
-    {"key": "profile", "label": "Profile", "icon": "user", "order": 3, "visible": True, "screen": "ProfileScreen"},
+    {"key": "home", "label": "Home", "icon": "home", "order": 0, "visible": True, "screen": "home"},
+    {"key": "search", "label": "Search", "icon": "search", "order": 1, "visible": True, "screen": "search"},
+    {"key": "bookings", "label": "Bookings", "icon": "calendar", "order": 2, "visible": True, "screen": "bookings"},
+    {"key": "wallet", "label": "Wallet", "icon": "wallet", "order": 3, "visible": True, "screen": "wallet"},
+    {"key": "profile", "label": "Profile", "icon": "user", "order": 4, "visible": True, "screen": "profile"},
 ]
 
 
