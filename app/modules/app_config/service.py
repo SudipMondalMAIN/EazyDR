@@ -65,6 +65,8 @@ async def update_version_control(db: AsyncSession, actor_id: uuid.UUID, payload:
         config.force_update = payload.force_update
     if payload.update_message is not None:
         config.update_message = payload.update_message
+    if payload.update_url is not None:
+        config.update_url = payload.update_url
     await db.commit()
     await db.refresh(config)
     await log_action(

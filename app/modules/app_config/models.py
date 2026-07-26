@@ -36,6 +36,9 @@ class AppConfig(Base, UUIDPKMixin, TimestampMixin):
     update_message: Mapped[str] = mapped_column(
         String(500), default="A new version is available. Please update to continue."
     )
+    # Play Store / App Store link the force-update screen's "Update Now"
+    # button opens. Left blank means the button is hidden client-side.
+    update_url: Mapped[str] = mapped_column(String(500), default="")
 
 
 class NotificationBroadcast(Base, UUIDPKMixin, TimestampMixin):

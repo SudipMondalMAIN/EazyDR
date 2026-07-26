@@ -27,6 +27,7 @@ class VersionControlUpdate(BaseModel):
     min_app_version: str | None = None
     force_update: bool | None = None
     update_message: str | None = None
+    update_url: str | None = None
 
 
 class AppConfigOut(BaseModel):
@@ -37,6 +38,7 @@ class AppConfigOut(BaseModel):
     min_app_version: str
     force_update: bool
     update_message: str
+    update_url: str
 
     class Config:
         from_attributes = True

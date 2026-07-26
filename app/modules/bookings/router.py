@@ -15,6 +15,7 @@ from app.modules.bookings.schemas import (
     BookingWithQrOut,
     CancelBookingRequest,
     CancelBookingResult,
+    QueueStatusOut,
     VerifyOnlinePaymentRequest,
 )
 
@@ -66,10 +67,30 @@ async def get_booking_receipt(
     ):
         raise ForbiddenError("Not your booking")
 
-    booking, qr_base64 = await service.get_booking_receipt(db, booking_id)
+    booking, qr_base64, doctor_name, facility_name, facility_address = await service.get_booking_receipt(db, booking_id)
     out = BookingWithQrOut.model_validate(booking)
     out.qr_code_base64 = qr_base64
+    out.doctor_name = doctor_name
+    out.facility_name = facility_name
+    out.facility_address = facility_address
     return out
+
+
+@router.get("/{booking_id}/queue-status", response_model=QueueStatusOut)
+async def get_queue_status(
+    booking_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Live snapshot for the 'live status' screen: current token being
+    seen, how many are ahead of this booking, and an estimated wait.
+    Meant to be polled by the app while a booking is upcoming."""
+    booking = await service.get_booking(db, booking_id)
+    if not (
+        booking.patient_id == user.id
+        or user.role in (UserRole.ADMIN, UserRole.SUPERADMIN)
+        or (user.role == UserRole.MERCHANT and (await get_facility(db, booking.facility_id)).owner_user_id == user.id)
+    ):
+        raise ForbiddenError("Not your booking")
+    return await service.get_queue_status(db, booking_id)
 
 
 @router.post("/{booking_id}/verify-payment", response_model=BookingOut)

@@ -36,6 +36,22 @@ class BookingOut(BaseModel):
 
 class BookingWithQrOut(BookingOut):
     qr_code_base64: str = ""
+    doctor_name: str = ""
+    facility_name: str = ""
+    facility_address: str = ""
+
+
+class QueueStatusOut(BaseModel):
+    booking_id: uuid.UUID
+    doctor_name: str
+    facility_name: str
+    appointment_date: str
+    your_token: int
+    status: BookingStatus
+    current_token: int | None       # token currently in_progress right now, if any
+    patients_ahead: int             # checked_in patients with a smaller token, not yet served
+    estimated_wait_minutes: int | None
+    updated_at: datetime
 
 
 class CancelBookingRequest(BaseModel):

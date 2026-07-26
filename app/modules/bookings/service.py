@@ -261,13 +261,68 @@ async def get_booking(db: AsyncSession, booking_id: uuid.UUID) -> Booking:
     return booking
 
 
-async def get_booking_receipt(db: AsyncSession, booking_id: uuid.UUID) -> tuple[Booking, str]:
+async def get_booking_receipt(db: AsyncSession, booking_id: uuid.UUID) -> tuple[Booking, str, str, str, str]:
     """Re-derives the same QR PNG shown at booking time (deterministic from
     the stored qr_uuid + qr_signature) so a receipt/invoice view can be
-    reopened or reprinted any time, not just right after booking."""
+    reopened or reprinted any time, not just right after booking. Also pulls
+    doctor/facility display names so the receipt doesn't need extra calls."""
     booking = await get_booking(db, booking_id)
     qr_base64 = _generate_qr_base64(booking.qr_uuid, booking.qr_signature)
-    return booking, qr_base64
+    doctor = await get_doctor(db, booking.doctor_id)
+    facility = await get_facility(db, booking.facility_id)
+    return booking, qr_base64, doctor.full_name, facility.name, facility.address
+
+
+async def get_queue_status(db: AsyncSession, booking_id: uuid.UUID) -> dict:
+    """Live queue snapshot for a single booking: which token is currently
+    being seen, how many checked-in patients are still ahead of this one,
+    and a rough wait estimate from the doctor's slot duration. Recomputed
+    fresh on every call — there's no cached/pushed state, the app polls."""
+    booking = await get_booking(db, booking_id)
+    doctor = await get_doctor(db, booking.doctor_id)
+    facility = await get_facility(db, booking.facility_id)
+
+    result = await db.execute(
+        select(Booking).where(
+            Booking.doctor_id == booking.doctor_id,
+            Booking.appointment_date == booking.appointment_date,
+            Booking.status.in_([BookingStatus.CHECKED_IN, BookingStatus.IN_PROGRESS]),
+        )
+    )
+    same_day_active = list(result.scalars().all())
+
+    in_progress = [b for b in same_day_active if b.status == BookingStatus.IN_PROGRESS]
+    current_token = in_progress[0].token_number if in_progress else None
+
+    patients_ahead = len([
+        b for b in same_day_active
+        if b.status == BookingStatus.CHECKED_IN and b.token_number < booking.token_number
+    ])
+
+    # Estimate wait using the doctor's configured slot length for that
+    # weekday (same source of truth as _compute_expected_time), default 15m
+    # if no matching slot is on file.
+    weekday = datetime.strptime(booking.appointment_date, "%Y-%m-%d").weekday()
+    slots = await list_availability(db, booking.doctor_id)
+    matching = [s for s in slots if not s.is_leave and s.day_of_week == weekday]
+    slot_duration = matching[0].slot_duration_minutes if matching else 15
+
+    estimated_wait_minutes = None
+    if booking.status in (BookingStatus.CHECKED_IN, BookingStatus.CONFIRMED, BookingStatus.PENDING):
+        estimated_wait_minutes = patients_ahead * slot_duration
+
+    return {
+        "booking_id": booking.id,
+        "doctor_name": doctor.full_name,
+        "facility_name": facility.name,
+        "appointment_date": booking.appointment_date,
+        "your_token": booking.token_number,
+        "status": booking.status,
+        "current_token": current_token,
+        "patients_ahead": patients_ahead,
+        "estimated_wait_minutes": estimated_wait_minutes,
+        "updated_at": datetime.now(timezone.utc),
+    }
 
 
 async def get_booking_by_qr(db: AsyncSession, qr_uuid: uuid.UUID, signature: str) -> Booking:
