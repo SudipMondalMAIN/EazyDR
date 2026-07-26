@@ -1,16 +1,15 @@
 """add app_config and notification_broadcasts tables
 
 Revision ID: e7a1c9d4f210
-Revises:
+Revises: b3f1c9a7d2e4
 Create Date: 2026-07-26
 
 Adds the `app_config` single-row table (bottom nav, theme, force-update
 version gate) and `notification_broadcasts` (history of admin-sent custom
 notifications). See app/modules/app_config/.
 
-NOTE: `down_revision` is left as None, matching the other migrations in
-this repo (no chain exists yet). If a prior revision is already applied to
-your database, update `down_revision` before running `alembic upgrade head`.
+Chained onto b3f1c9a7d2e4 (add_online_payment_settled_to_bookings), the
+current head of this repo's migration chain.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -18,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "e7a1c9d4f210"
-down_revision = None
+down_revision = "b3f1c9a7d2e4"
 branch_labels = None
 depends_on = None
 
