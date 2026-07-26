@@ -22,6 +22,7 @@ celery_app = Celery(
     include=[
         "app.modules.queue.tasks",
         "app.modules.notifications.tasks",
+        "app.modules.app_config.tasks",
     ],
 )
 

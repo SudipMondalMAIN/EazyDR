@@ -5,6 +5,7 @@ it exists purely so that `Base.metadata` is fully populated before
 new module with a models.py, add its import here too.
 """
 from app.modules.admin import models as admin_models  # noqa: F401
+from app.modules.app_config import models as app_config_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.banners import models as banner_models  # noqa: F401
 from app.modules.bookings import models as booking_models  # noqa: F401

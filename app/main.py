@@ -8,6 +8,8 @@ from app.core.config import settings
 from app.core.database import Base, engine
 from app.core.rate_limit import RateLimitMiddleware
 from app.modules.admin.router import router as admin_router
+from app.modules.app_config.router import admin_router as app_config_admin_router
+from app.modules.app_config.router import public_router as app_config_public_router
 from app.modules.auth.router import router as auth_router
 from app.modules.banners.router import router as banners_router
 from app.modules.bookings.router import router as bookings_router
@@ -50,6 +52,8 @@ app.include_router(banners_router)
 app.include_router(reviews_router)
 app.include_router(favorites_router)
 app.include_router(notifications_router)
+app.include_router(app_config_public_router)
+app.include_router(app_config_admin_router)
 
 
 @app.on_event("startup")
