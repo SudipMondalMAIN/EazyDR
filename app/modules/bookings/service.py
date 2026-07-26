@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.modules.auth.models import User
 from app.modules.bookings.models import Booking, BookingStatus, PaymentMode
 from app.modules.bookings.schemas import BookingCreate
-from app.modules.facilities.service import get_doctor, get_facility
+from app.modules.facilities.service import get_doctor, get_facility, list_availability
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
 from app.modules.notifications.tasks import send_transactional_email
@@ -49,6 +49,48 @@ async def _next_token_number(db: AsyncSession, doctor_id: uuid.UUID, appointment
         )
     )
     return int(result.scalar_one()) + 1
+
+
+# Used when a doctor has no matching availability row for the requested day —
+# should be rare in practice since facilities are expected to keep a weekly
+# schedule set, but a booking must never hard-fail just because of a gap in it.
+_FALLBACK_START_TIME = "10:00"
+
+
+async def _compute_expected_time(
+    db: AsyncSession, doctor_id: uuid.UUID, appointment_date: str, token_number: int
+) -> str:
+    """Derives the patient's expected slot time from the doctor's weekly
+    availability + their position in today's queue (token_number), instead of
+    letting the patient pick a time themselves. This keeps a single source of
+    truth (the queue) for how the day's tokens map to clock time.
+
+    day_of_week: 0=Monday ... 6=Sunday (matches DoctorAvailability), derived
+    from the appointment_date's actual weekday.
+    """
+    weekday = datetime.strptime(appointment_date, "%Y-%m-%d").weekday()
+    slots = await list_availability(db, doctor_id)
+
+    on_leave = any(
+        s.leave_date == appointment_date and s.is_leave for s in slots
+    )
+    if on_leave:
+        raise BadRequestError("This doctor is on leave on the selected date")
+
+    matching = [s for s in slots if not s.is_leave and s.day_of_week == weekday]
+    if not matching:
+        logging.getLogger("bookings.service").warning(
+            "no availability slot for doctor=%s weekday=%s — falling back to default start time",
+            doctor_id, weekday,
+        )
+        start_time, slot_duration = _FALLBACK_START_TIME, 15
+    else:
+        slot = matching[0]
+        start_time, slot_duration = slot.start_time, slot.slot_duration_minutes
+
+    start_dt = datetime.strptime(start_time, "%H:%M")
+    expected_dt = start_dt + timedelta(minutes=slot_duration * (token_number - 1))
+    return expected_dt.strftime("%H:%M")
 
 
 async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: BookingCreate) -> tuple[Booking, str]:
@@ -90,6 +132,9 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
     booking: Booking | None = None
     for attempt in range(max_attempts):
         token_number = await _next_token_number(db, doctor.id, payload.appointment_date)
+        expected_time = await _compute_expected_time(
+            db, doctor.id, payload.appointment_date, token_number
+        )
         booking = Booking(
             patient_id=patient_id,
             facility_id=facility.id,
@@ -99,7 +144,7 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             patient_address=payload.patient_address,
             token_number=token_number,
             appointment_date=payload.appointment_date,
-            expected_time=payload.expected_time,
+            expected_time=expected_time,
             booking_fee=booking_fee,
             platform_commission_amount=commission_amount,
             facility_earning_amount=facility_amount,
@@ -140,7 +185,7 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             patient_id,
             title="Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received",
             body=f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
-            f"{payload.expected_time}.",
+            f"{expected_time}.",
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
@@ -159,7 +204,7 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             email_subject = "Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received"
             email_body = (
                 f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
-                f"{payload.expected_time}."
+                f"{expected_time}."
             )
             send_transactional_email.delay(patient.email, email_subject, email_body)
     except Exception:  # noqa: BLE001

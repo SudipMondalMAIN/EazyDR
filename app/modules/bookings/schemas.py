@@ -13,7 +13,6 @@ class BookingCreate(BaseModel):
     patient_phone: str
     patient_address: str
     appointment_date: str   # "YYYY-MM-DD"
-    expected_time: str      # "HH:MM"
     payment_mode: PaymentMode
 
 
