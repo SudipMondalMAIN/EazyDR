@@ -195,3 +195,13 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> TokenRes
         raise UnauthorizedError("User not found or disabled")
 
     return issue_tokens(user)
+
+
+async def update_push_token(db: AsyncSession, user: User, device_push_token: str) -> User:
+    """Stores the FCM registration token so notifications/tasks.py can push
+    to this device. Called on login/app-start and whenever FCM rotates the
+    token (onTokenRefresh on the client)."""
+    user.device_push_token = device_push_token
+    await db.commit()
+    await db.refresh(user)
+    return user

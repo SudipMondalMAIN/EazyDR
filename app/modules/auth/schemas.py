@@ -79,3 +79,7 @@ class ResetPasswordRequest(BaseModel):
     email: EmailStr
     otp: str = Field(min_length=4, max_length=8)
     new_password: str = Field(min_length=6, max_length=100)
+
+
+class PushTokenRequest(BaseModel):
+    device_push_token: str = Field(min_length=10, max_length=255)

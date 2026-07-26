@@ -9,6 +9,7 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     LoginOTPRequest,
     LoginRequest,
+    PushTokenRequest,
     RefreshRequest,
     RegisterRequest,
     RequestOTPRequest,
@@ -95,4 +96,16 @@ async def upload_my_photo(
     keyed off the current user, not their role."""
     key = await storage_service.upload_file(file.file, folder="users")
     user = await service.update_profile_photo(db, user, key)
+    return service.attach_photo_url(user)
+
+
+@router.patch("/me/push-token", response_model=UserOut)
+async def update_my_push_token(
+    payload: PushTokenRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Registers/refreshes this device's FCM token so notifications/tasks.py
+    can deliver push notifications to it."""
+    user = await service.update_push_token(db, user, payload.device_push_token)
     return service.attach_photo_url(user)
