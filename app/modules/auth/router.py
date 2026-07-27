@@ -15,6 +15,7 @@ from app.modules.auth.schemas import (
     RequestOTPRequest,
     ResetPasswordRequest,
     TokenResponse,
+    UpdateProfileRequest,
     UserOut,
     VerifyLoginOTPRequest,
     VerifySignupOTPRequest,
@@ -54,8 +55,8 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login-otp/request", status_code=204)
 async def login_otp_request(payload: LoginOTPRequest, db: AsyncSession = Depends(get_db)):
-    """Step 1 of email-OTP login: verify phone+password, email an OTP."""
-    await service.request_login_otp(db, payload.phone, payload.password)
+    """Step 1 of email-OTP login: verify identifier(email/phone)+password, email an OTP."""
+    await service.request_login_otp(db, payload.identifier, payload.password)
 
 
 @router.post("/login-otp/verify", response_model=TokenResponse)
@@ -67,12 +68,12 @@ async def login_otp_verify(payload: VerifyLoginOTPRequest, db: AsyncSession = De
 
 @router.post("/forgot-password", status_code=204)
 async def forgot_password(payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    await service.request_password_reset(db, payload.email)
+    await service.request_password_reset(db, payload.identifier)
 
 
 @router.post("/reset-password", status_code=204)
 async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    await service.reset_password(db, payload.email, payload.otp, payload.new_password)
+    await service.reset_password(db, payload.identifier, payload.otp, payload.new_password)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -82,6 +83,17 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
+    return service.attach_photo_url(user)
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_my_profile(
+    payload: UpdateProfileRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Full profile edit for the logged-in user (name/phone/email)."""
+    user = await service.update_profile(db, user, payload)
     return service.attach_photo_url(user)
 
 

@@ -10,9 +10,24 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.auth.models import User, UserRole
-from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.modules.auth.schemas import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UpdateProfileRequest,
+    UserOut,
+)
 from app.services import otp_service
 from app.services.storage_service import storage_service
+
+
+async def resolve_user_by_identifier(db: AsyncSession, identifier: str) -> User | None:
+    """identifier can be an email or a phone number. Email login/OTP is
+    always resolved through user.email regardless of which one was typed."""
+    identifier = identifier.strip()
+    column = User.email if "@" in identifier else User.phone
+    result = await db.execute(select(User).where(column == identifier))
+    return result.scalar_one_or_none()
 
 
 async def register_user(db: AsyncSession, payload: RegisterRequest) -> User:
@@ -94,10 +109,9 @@ async def verify_signup_otp(db: AsyncSession, email: str, otp: str) -> TokenResp
 
 
 async def authenticate(db: AsyncSession, payload: LoginRequest) -> User:
-    result = await db.execute(select(User).where(User.phone == payload.phone))
-    user = result.scalar_one_or_none()
+    user = await resolve_user_by_identifier(db, payload.identifier)
     if not user or not verify_password(payload.password, user.password_hash):
-        raise UnauthorizedError("Invalid phone number or password")
+        raise UnauthorizedError("Invalid email/phone or password")
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")
     if not user.is_email_verified:
@@ -105,14 +119,13 @@ async def authenticate(db: AsyncSession, payload: LoginRequest) -> User:
     return user
 
 
-async def request_login_otp(db: AsyncSession, phone: str, password: str) -> str:
-    """Verifies phone+password, then emails a login OTP. Returns the user's
-    email (masked by the caller/router if desired) so the client knows
-    where the code was sent."""
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
+async def request_login_otp(db: AsyncSession, identifier: str, password: str) -> str:
+    """Verifies identifier(email/phone)+password, then emails a login OTP.
+    Returns the user's email (masked by the caller/router if desired) so
+    the client knows where the code was sent."""
+    user = await resolve_user_by_identifier(db, identifier)
     if not user or not verify_password(password, user.password_hash):
-        raise UnauthorizedError("Invalid phone number or password")
+        raise UnauthorizedError("Invalid email/phone or password")
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")
     if not user.is_email_verified:
@@ -135,22 +148,22 @@ async def verify_login_otp(db: AsyncSession, email: str, otp: str) -> User:
     return user
 
 
-async def request_password_reset(db: AsyncSession, email: str) -> None:
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+async def request_password_reset(db: AsyncSession, identifier: str) -> None:
+    """identifier can be the account's email or phone — either way the OTP
+    is always emailed to the account's registered email, never SMS'd."""
+    user = await resolve_user_by_identifier(db, identifier)
     if not user:
-        # Don't reveal whether the email is registered.
+        # Don't reveal whether the email/phone is registered.
         return
     await otp_service.request_otp(user.email, "forgot_password")
 
 
-async def reset_password(db: AsyncSession, email: str, otp: str, new_password: str) -> None:
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+async def reset_password(db: AsyncSession, identifier: str, otp: str, new_password: str) -> None:
+    user = await resolve_user_by_identifier(db, identifier)
     if not user:
-        raise BadRequestError("Invalid email or OTP")
+        raise BadRequestError("Invalid email/phone or OTP")
 
-    await otp_service.verify_otp(email, otp, "forgot_password")
+    await otp_service.verify_otp(user.email, otp, "forgot_password")
 
     user.password_hash = hash_password(new_password)
     await db.commit()
@@ -195,6 +208,35 @@ async def refresh_access_token(db: AsyncSession, refresh_token: str) -> TokenRes
         raise UnauthorizedError("User not found or disabled")
 
     return issue_tokens(user)
+
+
+async def update_profile(db: AsyncSession, user: User, payload: UpdateProfileRequest) -> User:
+    """Full profile edit (full_name/phone/email) for the logged-in user.
+    Changing phone/email is blocked if another account already owns the
+    new value. Changing email re-locks is_email_verified — the account
+    still works (login isn't re-blocked retroactively), but the client
+    should prompt for a fresh signup-style OTP verification if you want
+    to enforce it strictly."""
+    if payload.phone is not None and payload.phone != user.phone:
+        existing = (await db.execute(select(User).where(User.phone == payload.phone))).scalar_one_or_none()
+        if existing:
+            raise ConflictError("Phone number already in use by another account")
+        user.phone = payload.phone
+        user.is_phone_verified = False
+
+    if payload.email is not None and payload.email != user.email:
+        existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+        if existing:
+            raise ConflictError("Email already in use by another account")
+        user.email = payload.email
+        user.is_email_verified = False
+
+    if payload.full_name is not None:
+        user.full_name = payload.full_name
+
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 
 async def update_push_token(db: AsyncSession, user: User, device_push_token: str) -> User:

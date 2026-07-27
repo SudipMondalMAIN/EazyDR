@@ -14,7 +14,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    phone: str
+    identifier: str = Field(min_length=3, description="Email or phone number")
     password: str
 
 
@@ -58,9 +58,10 @@ class VerifySignupOTPRequest(BaseModel):
 
 
 class LoginOTPRequest(BaseModel):
-    """Step 1 of OTP login: verify password, then email an OTP."""
+    """Step 1 of OTP login: verify identifier (email or phone) + password,
+    then email an OTP."""
 
-    phone: str
+    identifier: str = Field(min_length=3, description="Email or phone number")
     password: str
 
 
@@ -72,13 +73,23 @@ class VerifyLoginOTPRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    identifier: str = Field(min_length=3, description="Email or phone number")
 
 
 class ResetPasswordRequest(BaseModel):
-    email: EmailStr
+    identifier: str = Field(min_length=3, description="Email or phone number")
     otp: str = Field(min_length=4, max_length=8)
     new_password: str = Field(min_length=6, max_length=100)
+
+
+class UpdateProfileRequest(BaseModel):
+    """Full profile edit for the logged-in user. Changing phone/email
+    re-locks the corresponding verified flag (email OTP re-verification
+    required again if email changes)."""
+
+    full_name: str | None = Field(default=None, min_length=2, max_length=150)
+    phone: str | None = Field(default=None, min_length=10, max_length=15)
+    email: EmailStr | None = None
 
 
 class PushTokenRequest(BaseModel):
