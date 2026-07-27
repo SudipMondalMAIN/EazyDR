@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +13,11 @@ from app.modules.app_config.schemas import (
     ThemeConfigUpdate,
     VersionControlUpdate,
 )
-from app.modules.app_config.tasks import send_broadcast
+from app.modules.app_config.tasks import _send_broadcast, send_broadcast
 from app.modules.auth.dependencies import require_superadmin
 from app.modules.auth.models import User
+
+logger = logging.getLogger("app_config.router")
 
 # Public router — the User App calls this at splash, before login, so it
 # must NOT require auth. No prefix beyond /api/v1 (not under /admin).
@@ -63,11 +67,18 @@ async def broadcast_notification(
     actor: User = Depends(require_superadmin),
 ):
     # Record created with counts=0, then the celery task fills in real
-    # numbers once fan-out completes (see tasks.py).
+    # numbers once fan-out completes (see tasks.py). If no broker is
+    # configured (e.g. REDIS_URL unset on this deploy), .delay() can't
+    # reach a broker at all — fall back to sending inline so the admin
+    # doesn't just get a 500 for a missing worker.
     record = await service.create_broadcast_record(
         db, actor.id, payload, recipients_count=0, push_success_count=0,
     )
-    send_broadcast.delay(str(record.id), payload.title, payload.body)
+    try:
+        send_broadcast.delay(str(record.id), payload.title, payload.body)
+    except Exception:
+        logger.warning("Celery broker unavailable, sending broadcast %s inline instead", record.id)
+        await _send_broadcast(str(record.id), payload.title, payload.body)
     return record
 
 
