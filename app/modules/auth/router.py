@@ -62,7 +62,7 @@ async def login_otp_request(payload: LoginOTPRequest, db: AsyncSession = Depends
 @router.post("/login-otp/verify", response_model=TokenResponse)
 async def login_otp_verify(payload: VerifyLoginOTPRequest, db: AsyncSession = Depends(get_db)):
     """Step 2 of email-OTP login: exchange the emailed OTP for tokens."""
-    user = await service.verify_login_otp(db, payload.email, payload.otp)
+    user = await service.verify_login_otp(db, payload.identifier, payload.otp)
     return service.issue_tokens(user)
 
 

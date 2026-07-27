@@ -119,12 +119,16 @@ async def authenticate(db: AsyncSession, payload: LoginRequest) -> User:
     return user
 
 
-async def request_login_otp(db: AsyncSession, identifier: str, password: str) -> str:
-    """Verifies identifier(email/phone)+password, then emails a login OTP.
+async def request_login_otp(db: AsyncSession, identifier: str, password: str | None = None) -> str:
+    """Emails a login OTP for the account matching identifier(email/phone).
+    If password is given, it's verified as an extra factor first; if
+    omitted, this is a pure passwordless OTP login (identifier only).
     Returns the user's email (masked by the caller/router if desired) so
     the client knows where the code was sent."""
     user = await resolve_user_by_identifier(db, identifier)
-    if not user or not verify_password(password, user.password_hash):
+    if not user:
+        raise UnauthorizedError("Invalid email/phone or password")
+    if password is not None and not verify_password(password, user.password_hash):
         raise UnauthorizedError("Invalid email/phone or password")
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")
@@ -135,13 +139,12 @@ async def request_login_otp(db: AsyncSession, identifier: str, password: str) ->
     return user.email
 
 
-async def verify_login_otp(db: AsyncSession, email: str, otp: str) -> User:
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+async def verify_login_otp(db: AsyncSession, identifier: str, otp: str) -> User:
+    user = await resolve_user_by_identifier(db, identifier)
     if not user:
-        raise UnauthorizedError("Invalid email or OTP")
+        raise UnauthorizedError("Invalid email/phone or OTP")
 
-    await otp_service.verify_otp(email, otp, "login")
+    await otp_service.verify_otp(user.email, otp, "login")
 
     if not user.is_active:
         raise UnauthorizedError("Account is disabled")

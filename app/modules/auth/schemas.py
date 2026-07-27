@@ -58,17 +58,21 @@ class VerifySignupOTPRequest(BaseModel):
 
 
 class LoginOTPRequest(BaseModel):
-    """Step 1 of OTP login: verify identifier (email or phone) + password,
-    then email an OTP."""
+    """Step 1 of OTP login: identifier (email or phone) is required.
+    Password is optional — if omitted, this is a pure passwordless OTP
+    login (identifier only); if provided, it's verified as an extra
+    factor before the OTP is sent."""
 
     identifier: str = Field(min_length=3, description="Email or phone number")
-    password: str
+    password: str | None = None
 
 
 class VerifyLoginOTPRequest(BaseModel):
-    """Step 2 of OTP login: exchange the emailed OTP for tokens."""
+    """Step 2 of OTP login: exchange the emailed OTP for tokens. identifier
+    can be the same email or phone the user typed in step 1 — the OTP
+    itself is always keyed by the account's registered email server-side."""
 
-    email: EmailStr
+    identifier: str = Field(min_length=3, description="Email or phone number")
     otp: str = Field(min_length=4, max_length=8)
 
 
