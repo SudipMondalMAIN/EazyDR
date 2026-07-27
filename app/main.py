@@ -1,11 +1,11 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core import model_registry  # noqa: F401  (populates Base.metadata)
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, get_db
 from app.core.rate_limit import RateLimitMiddleware
 from app.modules.admin.router import router as admin_router
 from app.modules.app_config.router import admin_router as app_config_admin_router
@@ -54,6 +54,40 @@ app.include_router(favorites_router)
 app.include_router(notifications_router)
 app.include_router(app_config_public_router)
 app.include_router(app_config_admin_router)
+
+
+@app.get("/api/v1/_debug/migration-check")
+async def _debug_migration_check(db=Depends(get_db)):
+    """TEMPORARY — remove after confirming migrations are applied on Render.
+    Shows the DB's current alembic revision and the live values of the
+    bookingstatus enum, so this can be checked from a browser without
+    shell access."""
+    from sqlalchemy import text
+
+    version_row = (await db.execute(text("SELECT version_num FROM alembic_version"))).first()
+    enum_rows = (
+        await db.execute(
+            text(
+                "SELECT enumlabel FROM pg_enum WHERE enumtypid = "
+                "(SELECT oid FROM pg_type WHERE typname = 'bookingstatus') ORDER BY enumsortorder"
+            )
+        )
+    ).all()
+    has_update_url = (
+        await db.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'app_config' AND column_name = 'update_url'"
+            )
+        )
+    ).first()
+
+    return {
+        "alembic_version_in_db": version_row[0] if version_row else None,
+        "expected_head": "f2c8b6e91a3d",
+        "bookingstatus_enum_values": [r[0] for r in enum_rows],
+        "app_config_has_update_url_column": has_update_url is not None,
+    }
 
 
 @app.on_event("startup")
