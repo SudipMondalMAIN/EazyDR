@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.exceptions import NotFoundError
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.security import decode_token
 from app.modules.auth.dependencies import get_current_user, require_admin
@@ -90,6 +91,18 @@ async def escalate_session(
     await db.commit()
     await db.refresh(sys_msg)
     await _broadcast_new_messages(session_id, [sys_msg])
+    return session
+
+
+@router.post("/sessions/{session_id}/close", response_model=ChatSessionOut)
+async def end_chat(session_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """User-initiated 'End Chat' — only the session's own user can close it
+    this way (admins close via the separate /admin/.../close route)."""
+    session = await service.get_session(db, session_id)
+    if session.user_id != user.id:
+        raise NotFoundError("Chat session not found")
+    session = await service.close_session(db, session)
+    await chat_manager.broadcast(session_id, {"type": "session_closed", "session_id": str(session_id)})
     return session
 
 
