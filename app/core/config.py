@@ -16,9 +16,6 @@ class Settings(BaseSettings):
     app_name: str = "EazyDoctor"
     environment: str = "development"
     port: int = 8000
-    # Local timezone appointments are booked/expected in (IANA name — must
-    # stay configurable since a future all-India rollout may need per-region
-    # handling; never assume the server's own clock/timezone).
     app_timezone: str = "Asia/Kolkata"
 
     # Auth
@@ -27,22 +24,21 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
 
-    # Database — provider-agnostic. Only this string changes on migration
-    # (Supabase -> AWS RDS). No code elsewhere should know or care.
+    # Database
     database_url: str = ""
 
     # Redis
     redis_url: str = ""
 
-    # Rate limiting (see app/core/rate_limit.py for the per-route rules)
+    # Rate limiting
     rate_limit_enabled: bool = True
 
-    # Cache TTLs (seconds) — see app/services/cache_service.py
+    # Cache TTLs (seconds)
     cache_ttl_facility_search: int = 120
     cache_ttl_facility_profile: int = 300
 
     # Storage
-    storage_provider: str = "cloudinary"  # cloudinary | s3 | r2 | local
+    storage_provider: str = "cloudinary"
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
     cloudinary_api_secret: str = ""
@@ -51,8 +47,7 @@ class Settings(BaseSettings):
     firebase_credentials_json: str = ""
     firebase_database_url: str = ""
 
-    # Email (Brevo) — used for OTP delivery (signup/login/forgot-password)
-    # and all transactional notification emails. No SMS provider is used.
+    # Email (Brevo)
     brevo_api_key: str = ""
     brevo_sender_email: str = "contact@fliq.us.cc"
     brevo_sender_name: str = "EazyDoctor"
@@ -63,7 +58,7 @@ class Settings(BaseSettings):
     otp_resend_cooldown_seconds: int = 60
 
     # Payments
-    payment_provider: str = "cash_only"  # cash_only | paytm
+    payment_provider: str = "cash_only"
     paytm_merchant_id: str = ""
     paytm_merchant_key: str = ""
     paytm_website: str = "WEBSTAGING"
@@ -73,8 +68,7 @@ class Settings(BaseSettings):
     paytm_payout_merchant_id: str = ""
     paytm_payout_key: str = ""
 
-    # Business defaults (admin can override per-facility in DB; these are
-    # just the fallback/global defaults used to seed new facilities)
+    # Business defaults
     default_booking_fee: float = 10.0
     default_platform_commission_percent: float = 35.0
     default_cancellation_deduction_percent: float = 20.0
@@ -82,10 +76,11 @@ class Settings(BaseSettings):
     queue_stall_minutes: int = 15
     min_withdrawal_amount: float = 200.0
 
-    # Support chat — Google AI Studio (Gemini) powers the free-text bot in
-    # English/Hindi/Bengali. Env var name is AI_STUDIO_KEY (set on Render).
-    ai_studio_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    # Support chat — Groq (OpenAI-compatible) powers the free-text bot in
+    # English/Hindi/Bengali. Get a key from https://console.groq.com
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    ai_studio_key: str = ""  # unused now, kept so old env var doesn't break config loading
     support_contact_phone: str = ""
     support_contact_email: str = "contact@fliq.us.cc"
     support_contact_whatsapp: str = ""

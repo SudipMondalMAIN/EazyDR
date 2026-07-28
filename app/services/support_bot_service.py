@@ -1,11 +1,11 @@
 """
-Support bot — calls Google AI Studio's Gemini API server-side (key never
-reaches the Flutter app). Policy/FAQ facts are hardcoded into the system
-prompt so the model can't hallucinate wrong refund windows etc. The model
-is instructed to reply with the literal tag [ESCALATE] anywhere in its
-response whenever it can't help or the user asks for medical advice or a
-human — support_chat.service looks for that tag and flips the session to
-WAITING_AGENT.
+Support bot — calls Groq's OpenAI-compatible chat completions API
+server-side (key never reaches the Flutter app). Policy/FAQ facts are
+hardcoded into the system prompt so the model can't hallucinate wrong
+refund windows etc. The model is instructed to reply with the literal tag
+[ESCALATE] anywhere in its response whenever it can't help or the user
+asks for medical advice or a human — support_chat.service looks for that
+tag and flips the session to WAITING_AGENT.
 """
 import logging
 
@@ -15,9 +15,7 @@ from app.core.config import settings
 
 logger = logging.getLogger("support_bot_service")
 
-GEMINI_URL_TMPL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-)
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 ESCALATE_TAG = "[ESCALATE]"
 
@@ -31,7 +29,7 @@ POLICY_TEXT = f"""
 - Support contact (only give this if the user explicitly asks for phone/email/WhatsApp, or after escalation): phone {settings.support_contact_phone or 'not set'}, email {settings.support_contact_email}, WhatsApp {settings.support_contact_whatsapp or 'not set'}.
 """.strip()
 
-SYSTEM_PROMPT_TMPL = """You are the customer support assistant for EazyDoctor, a doctor/medical facility booking app. You must reply ONLY in {language}, in a short, friendly, simple tone suitable for a chat bubble (2-4 sentences max).
+SYSTEM_PROMPT_TMPL = """You are EazyDoctor Support Assistant. Answer only EazyDoctor-related questions. You must reply ONLY in {language}, in a short, friendly, simple tone suitable for a chat bubble (2-4 sentences max).
 
 You may ONLY use the following facts to answer booking/payment/account/refund questions. Never invent policy details that aren't listed here:
 {policy}
@@ -41,7 +39,7 @@ Rules you must always follow:
 2. NEVER give medical advice, diagnosis, medicine suggestions, or health opinions of any kind. If the user asks a health/medical question, politely tell them to consult their doctor directly, and append the literal tag {escalate_tag} at the very end of your reply so a human can also follow up.
 3. If you are not confident about the answer, or the answer needs info you don't have (e.g. a specific booking ID's status, a payment dispute, account access issue), say you'll connect them to a support agent, and append {escalate_tag} at the very end.
 4. If the user explicitly asks to talk to a human/agent/support executive, confirm you're connecting them, and append {escalate_tag} at the very end.
-5. Never mention that you are Gemini, Google, or an AI model. You are "EazyDoctor Support".
+5. Never mention that you are Groq, Llama, or an AI model. You are "EazyDoctor Support".
 6. Keep replies short — this is a mobile chat window, not an essay."""
 
 
@@ -50,37 +48,45 @@ def _system_prompt(language: str) -> str:
 
 
 async def get_bot_reply(history: list[dict], language: str) -> tuple[str, bool]:
-    """history: list of {"role": "user"|"model", "text": str}, oldest first.
-    Returns (reply_text_without_tag, should_escalate)."""
-    if not settings.ai_studio_key:
-        logger.warning("AI_STUDIO_KEY not configured — falling back to static reply")
+    """history: list of {"role": "user"|"model", "text": str}, oldest first
+    (role "model" here maps to OpenAI-style "assistant"). Returns
+    (reply_text_without_tag, should_escalate)."""
+    if not settings.groq_api_key:
+        logger.warning("GROQ_API_KEY not configured — falling back to static reply")
         return (
             "Sorry, our chat assistant is temporarily unavailable. Connecting you to a support agent.",
             True,
         )
 
-    contents = [{"role": h["role"], "parts": [{"text": h["text"]}]} for h in history]
+    messages = [{"role": "system", "content": _system_prompt(language)}]
+    for h in history:
+        role = "assistant" if h["role"] == "model" else "user"
+        messages.append({"role": role, "content": h["text"]})
+
     payload = {
-        "system_instruction": {"parts": [{"text": _system_prompt(language)}]},
-        "contents": contents,
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300},
+        "model": settings.groq_model,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_completion_tokens": 300,
     }
-    url = GEMINI_URL_TMPL.format(model=settings.gemini_model, key=settings.ai_studio_key)
+    headers = {
+        "Authorization": f"Bearer {settings.groq_api_key}",
+        "Content-Type": "application/json",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(GROQ_URL, json=payload, headers=headers)
         if resp.status_code >= 400:
-            logger.error("Gemini call failed (%s): %s", resp.status_code, resp.text)
+            logger.error("Groq call failed (%s): %s", resp.status_code, resp.text)
             return ("Sorry, I couldn't process that. Connecting you to a support agent.", True)
 
         data = resp.json()
-        candidates = data.get("candidates") or []
-        if not candidates:
+        choices = data.get("choices") or []
+        if not choices:
             return ("Sorry, I couldn't process that. Connecting you to a support agent.", True)
 
-        parts = candidates[0].get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts).strip()
+        text = (choices[0].get("message", {}).get("content") or "").strip()
 
         should_escalate = ESCALATE_TAG in text
         clean_text = text.replace(ESCALATE_TAG, "").strip()
@@ -88,5 +94,5 @@ async def get_bot_reply(history: list[dict], language: str) -> tuple[str, bool]:
             clean_text = "Connecting you to a support agent who can help further."
         return clean_text, should_escalate
     except Exception:
-        logger.exception("Gemini call raised an exception")
+        logger.exception("Groq call raised an exception")
         return ("Sorry, something went wrong. Connecting you to a support agent.", True)
