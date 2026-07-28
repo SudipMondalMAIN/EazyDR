@@ -4,8 +4,50 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
 from app.modules.auth.models import UserRole
-from app.modules.bookings.models import BookingStatus
+from app.modules.bookings.models import BookingStatus, PaymentMode
 from app.modules.facilities.models import FacilityType
+
+
+class BookingSearchOut(BaseModel):
+    """Full drill-down details for a single booking, returned by the admin
+    'search by booking code' endpoint. Includes the internal UUID (`id`)
+    since admin/support staff — unlike patients in the app — are allowed
+    to see it, plus patient/doctor/facility identifiers so a support agent
+    doesn't need follow-up calls to cross-reference anything."""
+
+    id: uuid.UUID
+    booking_code: str
+    status: BookingStatus
+
+    patient_id: uuid.UUID
+    patient_name: str
+    patient_phone: str
+    patient_address: str
+
+    facility_id: uuid.UUID
+    facility_name: str
+    doctor_id: uuid.UUID
+    doctor_name: str
+
+    token_number: int
+    appointment_date: str
+    expected_time: str
+
+    booking_fee: float
+    platform_commission_amount: float
+    facility_earning_amount: float
+    payment_mode: PaymentMode
+    payment_transaction_ref: str | None
+    cash_commission_settled: bool
+    online_payment_settled: bool
+
+    checked_in_at: datetime | None
+    consultation_started_at: datetime | None
+    consultation_completed_at: datetime | None
+    cancelled_at: datetime | None
+    cancellation_refund_points: int
+
+    created_at: datetime
 
 
 class BookingExportFilter(BaseModel):

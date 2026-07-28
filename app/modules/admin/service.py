@@ -110,6 +110,55 @@ async def get_analytics_summary(db: AsyncSession) -> dict:
     }
 
 
+async def search_booking_by_code(db: AsyncSession, booking_code: str) -> dict:
+    """Admin panel's 'find a booking' search — support staff only ever have
+    the human-facing code (e.g. from a patient call/screenshot), never the
+    internal UUID, so this is the entry point for pulling up every detail
+    of a booking from that code alone."""
+    code = booking_code.strip().upper()
+    query = (
+        select(Booking, Doctor.full_name, Facility.name)
+        .join(Doctor, Doctor.id == Booking.doctor_id)
+        .join(Facility, Facility.id == Booking.facility_id)
+        .where(Booking.booking_code == code)
+    )
+    result = await db.execute(query)
+    row = result.first()
+    if not row:
+        raise NotFoundError(f"No booking found with code '{booking_code}'")
+
+    booking, doctor_name, facility_name = row
+    return {
+        "id": booking.id,
+        "booking_code": booking.booking_code,
+        "status": booking.status,
+        "patient_id": booking.patient_id,
+        "patient_name": booking.patient_name,
+        "patient_phone": booking.patient_phone,
+        "patient_address": booking.patient_address,
+        "facility_id": booking.facility_id,
+        "facility_name": facility_name,
+        "doctor_id": booking.doctor_id,
+        "doctor_name": doctor_name,
+        "token_number": booking.token_number,
+        "appointment_date": booking.appointment_date,
+        "expected_time": booking.expected_time,
+        "booking_fee": booking.booking_fee,
+        "platform_commission_amount": booking.platform_commission_amount,
+        "facility_earning_amount": booking.facility_earning_amount,
+        "payment_mode": booking.payment_mode,
+        "payment_transaction_ref": booking.payment_transaction_ref,
+        "cash_commission_settled": booking.cash_commission_settled,
+        "online_payment_settled": booking.online_payment_settled,
+        "checked_in_at": booking.checked_in_at,
+        "consultation_started_at": booking.consultation_started_at,
+        "consultation_completed_at": booking.consultation_completed_at,
+        "cancelled_at": booking.cancelled_at,
+        "cancellation_refund_points": booking.cancellation_refund_points,
+        "created_at": booking.created_at,
+    }
+
+
 async def export_bookings_pdf(db: AsyncSession, filters: BookingExportFilter) -> bytes:
     """Fetches bookings matching the given filters (date / date range /
     doctor / facility / status) and renders them into a downloadable PDF.

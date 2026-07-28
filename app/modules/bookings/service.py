@@ -44,6 +44,31 @@ def _generate_qr_base64(qr_uuid: uuid.UUID, signature: str) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+_APP_TZ_FOR_CODE = ZoneInfo(settings.app_timezone)
+
+
+async def _next_booking_code(db: AsyncSession) -> str:
+    """Generates the next human-facing booking code for "today" (in the
+    app's local timezone): EZD{YY}{MM}{DD}{SEQ:05d}, e.g. "EZD26072800001"
+    for the 1st booking created on 2026-07-28, "EZD26072800002" for the
+    2nd, and so on. The sequence is global (not per-doctor/facility) and
+    resets at local midnight.
+
+    Like `_next_token_number`, this is computed from a COUNT which is not
+    safe under concurrency on its own — the unique constraint on
+    `booking_code` is the real guard, and the caller (`create_booking`)
+    retries on IntegrityError the same way it already does for token
+    collisions.
+    """
+    today_local = datetime.now(_APP_TZ_FOR_CODE).strftime("%y%m%d")
+    prefix = f"EZD{today_local}"
+    result = await db.execute(
+        select(func.count()).select_from(Booking).where(Booking.booking_code.like(f"{prefix}%"))
+    )
+    seq = int(result.scalar_one()) + 1
+    return f"{prefix}{seq:05d}"
+
+
 async def _next_token_number(db: AsyncSession, doctor_id: uuid.UUID, appointment_date: str) -> int:
     result = await db.execute(
         select(func.coalesce(func.max(Booking.token_number), 0)).where(
@@ -175,6 +200,10 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
         expected_time = await _compute_expected_time(
             db, doctor.id, payload.appointment_date, token_number
         )
+        # Recomputed every attempt (like token_number) so a retry after an
+        # IntegrityError — whether it collided on token_number or on
+        # booking_code — always picks up the latest, non-colliding value.
+        booking_code = await _next_booking_code(db)
         booking = Booking(
             patient_id=patient_id,
             facility_id=facility.id,
@@ -182,6 +211,7 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             patient_name=payload.patient_name,
             patient_phone=payload.patient_phone,
             patient_address=payload.patient_address,
+            booking_code=booking_code,
             token_number=token_number,
             appointment_date=payload.appointment_date,
             expected_time=expected_time,
@@ -318,6 +348,19 @@ async def get_booking(db: AsyncSession, booking_id: uuid.UUID) -> Booking:
     return booking
 
 
+async def get_booking_by_code(db: AsyncSession, booking_code: str) -> Booking:
+    """Looks up a booking by its human-facing code (e.g. "EZD26072800001")
+    — used by the admin panel's booking search, since admins/support staff
+    only ever see/hear this code from a patient, never the internal UUID."""
+    result = await db.execute(
+        select(Booking).where(Booking.booking_code == booking_code.strip().upper())
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise NotFoundError("Booking not found")
+    return booking
+
+
 async def get_booking_receipt(db: AsyncSession, booking_id: uuid.UUID) -> tuple[Booking, str, str, str, str]:
     """Re-derives the same QR PNG shown at booking time (deterministic from
     the stored qr_uuid + qr_signature) so a receipt/invoice view can be
@@ -370,6 +413,7 @@ async def get_queue_status(db: AsyncSession, booking_id: uuid.UUID) -> dict:
 
     return {
         "booking_id": booking.id,
+        "booking_code": booking.booking_code,
         "doctor_name": doctor.full_name,
         "facility_name": facility.name,
         "appointment_date": booking.appointment_date,

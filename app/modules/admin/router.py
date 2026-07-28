@@ -12,6 +12,7 @@ from app.modules.admin.schemas import (
     AnalyticsSummaryOut,
     AuditLogOut,
     BookingExportFilter,
+    BookingSearchOut,
     DoctorAdminOut,
     DoctorAdminUpdate,
     FacilityAdminOut,
@@ -70,6 +71,17 @@ async def audit_logs(
 @router.get("/analytics/summary", response_model=AnalyticsSummaryOut)
 async def analytics_summary(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
     return await service.get_analytics_summary(db)
+
+
+@router.get("/bookings/search/{booking_code}", response_model=BookingSearchOut)
+async def search_booking(
+    booking_code: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)
+):
+    """Look up a single booking by its human-facing code (e.g.
+    "EZD26072800001") and return every detail needed for support/drill-down
+    — patient, doctor, facility, payment, and status timeline. This is the
+    admin-panel counterpart to the app never showing the raw booking UUID."""
+    return await service.search_booking_by_code(db, booking_code)
 
 
 @router.get("/bookings/export/pdf")

@@ -18,6 +18,7 @@ class BookingCreate(BaseModel):
 
 class BookingOut(BaseModel):
     id: uuid.UUID
+    booking_code: str
     facility_id: uuid.UUID
     doctor_id: uuid.UUID
     patient_name: str
@@ -53,6 +54,7 @@ class BookingListItemOut(BookingOut):
 
 class QueueStatusOut(BaseModel):
     booking_id: uuid.UUID
+    booking_code: str
     doctor_name: str
     facility_name: str
     appointment_date: str
@@ -74,6 +76,7 @@ class VerifyOnlinePaymentRequest(BaseModel):
 
 class CancelBookingResult(BaseModel):
     booking_id: uuid.UUID
+    booking_code: str
     status: BookingStatus
     refund_reward_points: int
     deduction_percent_applied: float

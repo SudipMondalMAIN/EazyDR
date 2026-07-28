@@ -133,6 +133,7 @@ async def cancel_booking(
     booking, refund_points, deduction = await service.cancel_booking(db, booking, facility_fault=False)
     return CancelBookingResult(
         booking_id=booking.id,
+        booking_code=booking.booking_code,
         status=booking.status,
         refund_reward_points=refund_points,
         deduction_percent_applied=deduction,
@@ -152,6 +153,7 @@ async def grace_refund(
     booking, refund_points, deduction = await service.cancel_booking(db, booking, facility_fault=True)
     return CancelBookingResult(
         booking_id=booking.id,
+        booking_code=booking.booking_code,
         status=booking.status,
         refund_reward_points=refund_points,
         deduction_percent_applied=deduction,

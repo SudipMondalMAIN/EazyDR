@@ -37,6 +37,14 @@ class Booking(Base, UUIDPKMixin, TimestampMixin):
         ),
     )
 
+    # Human-facing booking identifier shown everywhere in the app instead of
+    # the raw `id` UUID — format EZD{YY}{MM}{DD}{SEQ:05d}, e.g.
+    # "EZD26072800001" for the 1st booking created on 2026-07-28. The
+    # sequence resets daily and is global across all facilities/doctors.
+    # The internal UUID `id` still exists and is used for all API routing
+    # and DB relations — this is purely the display/search identifier.
+    booking_code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
     facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), index=True)
     doctor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("doctors.id"), index=True)
