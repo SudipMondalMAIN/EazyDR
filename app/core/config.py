@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     queue_stall_minutes: int = 15
     min_withdrawal_amount: float = 200.0
 
+    # Support chat — Google AI Studio (Gemini) powers the free-text bot in
+    # English/Hindi/Bengali. Env var name is AI_STUDIO_KEY (set on Render).
+    ai_studio_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+    support_contact_phone: str = ""
+    support_contact_email: str = "contact@fliq.us.cc"
+    support_contact_whatsapp: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

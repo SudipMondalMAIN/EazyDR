@@ -17,3 +17,4 @@ from app.modules.rewards import earning_models  # noqa: F401
 from app.modules.rewards import models as reward_models  # noqa: F401
 from app.modules.reviews import models as review_models  # noqa: F401
 from app.modules.settlements import models as settlement_models  # noqa: F401
+from app.modules.support_chat import models as support_chat_models  # noqa: F401

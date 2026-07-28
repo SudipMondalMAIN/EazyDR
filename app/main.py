@@ -20,6 +20,7 @@ from app.modules.queue.router import router as queue_router
 from app.modules.rewards.router import router as rewards_router
 from app.modules.reviews.router import router as reviews_router
 from app.modules.settlements.router import router as settlements_router
+from app.modules.support_chat.router import router as support_chat_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -54,6 +55,7 @@ app.include_router(favorites_router)
 app.include_router(notifications_router)
 app.include_router(app_config_public_router)
 app.include_router(app_config_admin_router)
+app.include_router(support_chat_router)
 
 
 @app.get("/api/v1/_debug/migration-check")
