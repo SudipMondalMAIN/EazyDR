@@ -11,6 +11,7 @@ from app.modules.bookings import service
 from app.modules.facilities.service import get_facility
 from app.modules.bookings.schemas import (
     BookingCreate,
+    BookingListItemOut,
     BookingOut,
     BookingWithQrOut,
     CancelBookingRequest,
@@ -32,9 +33,18 @@ async def create_booking(
     return out
 
 
-@router.get("/my", response_model=list[BookingOut])
+@router.get("/my", response_model=list[BookingListItemOut])
 async def my_bookings(db: AsyncSession = Depends(get_db), user: User = Depends(require_patient)):
-    return await service.list_bookings_for_patient(db, user.id)
+    rows = await service.list_bookings_for_patient_with_details(db, user.id)
+    out = []
+    for row in rows:
+        item = BookingListItemOut.model_validate(row["booking"])
+        item.doctor_name = row["doctor_name"]
+        item.facility_name = row["facility_name"]
+        item.facility_address = row["facility_address"]
+        item.facility_photo_url = row["facility_photo_url"]
+        out.append(item)
+    return out
 
 
 @router.get("/{booking_id}", response_model=BookingOut)

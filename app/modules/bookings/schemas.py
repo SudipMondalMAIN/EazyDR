@@ -41,6 +41,16 @@ class BookingWithQrOut(BookingOut):
     facility_address: str = ""
 
 
+class BookingListItemOut(BookingOut):
+    """Used by GET /bookings/my — same fields as BookingWithQrOut minus the
+    QR (the list view doesn't need it), plus the facility photo so the
+    app can show it without a follow-up call per booking."""
+    doctor_name: str = ""
+    facility_name: str = ""
+    facility_address: str = ""
+    facility_photo_url: str | None = None
+
+
 class QueueStatusOut(BaseModel):
     booking_id: uuid.UUID
     doctor_name: str

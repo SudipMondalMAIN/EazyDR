@@ -17,7 +17,9 @@ from app.core.config import settings
 from app.modules.auth.models import User
 from app.modules.bookings.models import Booking, BookingStatus, PaymentMode
 from app.modules.bookings.schemas import BookingCreate
+from app.modules.facilities.models import Doctor, Facility
 from app.modules.facilities.service import get_doctor, get_facility, list_availability
+from app.services.storage_service import storage_service
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
 from app.modules.notifications.tasks import send_transactional_email
@@ -340,6 +342,41 @@ async def list_bookings_for_patient(db: AsyncSession, patient_id: uuid.UUID) -> 
         select(Booking).where(Booking.patient_id == patient_id).order_by(Booking.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def list_bookings_for_patient_with_details(db: AsyncSession, patient_id: uuid.UUID) -> list[dict]:
+    """Same bookings as list_bookings_for_patient, but with doctor name,
+    facility name/address, and facility photo attached — powers GET
+    /bookings/my for the "My Bookings" list. Facility/doctor rows are
+    fetched in two bulk queries (not per-booking) to avoid N+1s."""
+    bookings = await list_bookings_for_patient(db, patient_id)
+    if not bookings:
+        return []
+
+    facility_ids = {b.facility_id for b in bookings}
+    doctor_ids = {b.doctor_id for b in bookings}
+
+    fac_result = await db.execute(select(Facility).where(Facility.id.in_(facility_ids)))
+    facilities = {f.id: f for f in fac_result.scalars().all()}
+
+    doc_result = await db.execute(select(Doctor).where(Doctor.id.in_(doctor_ids)))
+    doctors = {d.id: d for d in doc_result.scalars().all()}
+
+    out = []
+    for b in bookings:
+        facility = facilities.get(b.facility_id)
+        doctor = doctors.get(b.doctor_id)
+        photo_url = None
+        if facility and facility.photo_storage_key:
+            photo_url = storage_service.get_public_url(facility.photo_storage_key)
+        out.append({
+            "booking": b,
+            "doctor_name": doctor.full_name if doctor else "",
+            "facility_name": facility.name if facility else "",
+            "facility_address": facility.address if facility else "",
+            "facility_photo_url": photo_url,
+        })
+    return out
 
 
 _APP_TZ = ZoneInfo(settings.app_timezone)
