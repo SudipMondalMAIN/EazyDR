@@ -1,9 +1,15 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import NotFoundError
+from app.core.config import settings
+from app.modules.bookings import service as bookings_service
+from app.modules.bookings.models import BookingStatus
+from app.modules.facilities.service import get_doctor, get_facility
+from app.modules.rewards.service import get_reward_balance
 from app.modules.support_chat.models import ChatMessage, ChatSession, ChatSessionStatus, SenderType
 from app.modules.support_chat.schemas import ChatSessionSummary
 from app.services.support_bot_service import get_bot_reply
@@ -63,6 +69,78 @@ async def add_user_message(db: AsyncSession, session: ChatSession, text: str) ->
     return msg
 
 
+async def _build_user_booking_context(db: AsyncSession, patient_id: uuid.UUID) -> str:
+    """Rich plain-text summary of the user's account so the bot can actually
+    answer 'where's my booking / did my payment go through / what's my
+    refund status / how many people ahead of me / can I still cancel /
+    how many points do I have' — instead of always saying it doesn't know.
+    Capped to the 5 most recent bookings so the prompt stays small."""
+    bookings = await bookings_service.list_bookings_for_patient(db, patient_id)
+    reward_balance = await get_reward_balance(db, patient_id)
+
+    if not bookings:
+        return f"This user has no bookings yet. Reward point balance: {reward_balance}."
+
+    bookings = sorted(bookings, key=lambda b: b.created_at, reverse=True)[:5]
+    now = datetime.now(timezone.utc)
+    lines = []
+    for b in bookings:
+        try:
+            doctor = await get_doctor(db, b.doctor_id)
+            facility = await get_facility(db, b.facility_id)
+            doctor_name, facility_name = doctor.full_name, facility.name
+        except Exception:
+            doctor_name, facility_name = "Unknown doctor", "Unknown facility"
+
+        line = (
+            f"- Booking #{b.token_number} on {b.appointment_date} at {b.expected_time} with {doctor_name} "
+            f"({facility_name}) — status: {b.status.value}, payment: {b.payment_mode.value}, "
+            f"amount: ₹{b.booking_fee}, booking_id: {b.id}"
+        )
+
+        # Live queue position — only meaningful once the appointment day has
+        # started and the booking is still active in the queue.
+        if b.status in (BookingStatus.CONFIRMED, BookingStatus.CHECKED_IN):
+            try:
+                q = await bookings_service.get_queue_status(db, b.id)
+                if q["patients_ahead"] is not None:
+                    wait = (
+                        f"{q['estimated_wait_minutes']} min estimated wait"
+                        if q["estimated_wait_minutes"] is not None
+                        else "wait time unavailable"
+                    )
+                    line += (
+                        f" | LIVE QUEUE: {q['patients_ahead']} patient(s) ahead, "
+                        f"current token being seen: {q['current_token'] or 'none yet'}, {wait}"
+                    )
+            except Exception:
+                pass
+
+        # Cancellation eligibility — tell the bot directly whether the lock
+        # window has already passed, so it doesn't have to guess.
+        if b.status in (BookingStatus.PENDING, BookingStatus.CONFIRMED):
+            try:
+                appt_dt = bookings_service._appointment_datetime(b)
+                hours_until = (appt_dt - now).total_seconds() / 3600
+                if hours_until < settings.cancellation_lock_hours:
+                    line += " | CANCELLATION: locked (too close to appointment time, cannot self-cancel)"
+                else:
+                    line += f" | CANCELLATION: still allowed (self-cancel from My Bookings, deduction applies)"
+            except Exception:
+                pass
+
+        # Cash refund credited so far for this specific booking (cancellation case).
+        if b.cancellation_refund_points:
+            line += f" | {b.cancellation_refund_points} reward points credited for this cancellation"
+
+        lines.append(line)
+
+    return (
+        f"This user's reward point balance: {reward_balance}.\n"
+        "This user's recent bookings:\n" + "\n".join(lines)
+    )
+
+
 async def handle_user_message(db: AsyncSession, session: ChatSession, text: str) -> list[ChatMessage]:
     """Adds the user's message, then — if the session is still bot-handled —
     gets a bot reply (or escalates). Returns the list of new messages
@@ -95,7 +173,9 @@ async def handle_user_message(db: AsyncSession, session: ChatSession, text: str)
         if m.sender_type in (SenderType.USER, SenderType.BOT)
     ]
 
-    reply_text, should_escalate = await get_bot_reply(history, session.language.value)
+    reply_text, should_escalate = await get_bot_reply(
+        history, session.language.value, await _build_user_booking_context(db, session.user_id)
+    )
 
     bot_msg = ChatMessage(session_id=session.id, sender_type=SenderType.BOT, text=reply_text)
     db.add(bot_msg)

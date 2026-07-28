@@ -24,8 +24,9 @@ ESCALATE_TAG = "[ESCALATE]"
 POLICY_TEXT = f"""
 - Booking: user searches a facility/doctor on the EazyDoctor app, picks a slot, and confirms. Booking fee is charged at booking time.
 - Payment failed: if money was deducted but booking shows failed, it will be auto-refunded within 7 working days to the original payment method.
-- Cancellation: user can cancel a booking from "My Bookings". A cancellation deduction may apply depending on how close to the appointment time it is cancelled.
-- Refund status: refunds are processed to the original payment method within 7 working days.
+- Cancellation: user can cancel a booking from "My Bookings", but only up to {settings.cancellation_lock_hours} hours before the appointment — after that it's locked and cannot be self-cancelled. Cancelling deducts {settings.default_cancellation_deduction_percent}% of the booking fee by default (facility-specific rate may differ); the remaining amount is credited as EazyDoctor reward points to the user's wallet, NOT refunded in cash to the original payment method.
+- Refund status (cash, payment-failed case only): processed to the original payment method within 7 working days.
+- Refund status (cancellation case): credited instantly as reward points to the user's in-app wallet — check the user's reward point balance below rather than telling them to wait 7 days.
 - Support contact (only give this if the user explicitly asks for phone/email/WhatsApp, or after escalation): phone {settings.support_contact_phone or 'not set'}, email {settings.support_contact_email}, WhatsApp {settings.support_contact_whatsapp or 'not set'}.
 """.strip()
 
@@ -36,6 +37,9 @@ Language: detect the language the user is currently writing in from their most r
 You may ONLY use the following facts to answer booking/payment/account/refund questions. Never invent policy details that aren't listed here:
 {policy}
 
+{booking_context}
+Use the booking data above to directly answer questions like "where's my booking", "did my payment go through", "what's my refund status", "when's my appointment" — reference the specific booking (date/doctor/facility/status) instead of giving a generic answer or escalating. Only escalate if the question needs something NOT in this data (e.g. a dispute, a booking not listed here, or something requiring a human decision).
+
 Rules you must always follow:
 1. Only help with: how to book, payment issues, cancellation, refund status, account/profile questions, and general app usage.
 2. NEVER give medical advice, diagnosis, medicine suggestions, or health opinions of any kind. If the user asks a health/medical question, politely tell them to consult their doctor directly, and append the literal tag {escalate_tag} at the very end of your reply so a human can also follow up.
@@ -45,13 +49,18 @@ Rules you must always follow:
 6. Keep replies short — this is a mobile chat window, not an essay."""
 
 
-def _system_prompt(language: str) -> str:
-    return SYSTEM_PROMPT_TMPL.format(language=language, policy=POLICY_TEXT, escalate_tag=ESCALATE_TAG)
+def _system_prompt(language: str, booking_context: str) -> str:
+    return SYSTEM_PROMPT_TMPL.format(
+        language=language, policy=POLICY_TEXT, escalate_tag=ESCALATE_TAG, booking_context=booking_context
+    )
 
 
-async def get_bot_reply(history: list[dict], language: str) -> tuple[str, bool]:
+async def get_bot_reply(history: list[dict], language: str, booking_context: str = "") -> tuple[str, bool]:
     """history: list of {"role": "user"|"model", "text": str}, oldest first
-    (role "model" here maps to OpenAI-style "assistant"). Returns
+    (role "model" here maps to OpenAI-style "assistant"). booking_context is
+    a short plain-text summary of the user's own recent bookings (status,
+    payment, refund-relevant fields) so the bot can answer 'where's my
+    booking' style questions directly instead of always escalating. Returns
     (reply_text_without_tag, should_escalate)."""
     if not settings.groq_api_key:
         logger.warning("GROQ_API_KEY not configured — falling back to static reply")
@@ -60,7 +69,7 @@ async def get_bot_reply(history: list[dict], language: str) -> tuple[str, bool]:
             True,
         )
 
-    messages = [{"role": "system", "content": _system_prompt(language)}]
+    messages = [{"role": "system", "content": _system_prompt(language, booking_context or "No booking data available.")}]
     for h in history:
         role = "assistant" if h["role"] == "model" else "user"
         messages.append({"role": role, "content": h["text"]})
