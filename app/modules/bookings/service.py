@@ -24,6 +24,7 @@ from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
 from app.modules.notifications.tasks import send_transactional_email
 from app.modules.rewards.service import credit_facility_earning, credit_reward_points
+from app.services.notification_service import notification_service
 from app.services.payment_service import payment_service
 
 
@@ -182,12 +183,16 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
     # Best-effort — an in-app notification failing must never fail the
     # booking itself, so exceptions here are logged and swallowed.
     try:
+        booking_title = "Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received"
+        booking_body = (
+            f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
+            f"{expected_time}."
+        )
         await create_notification(
             db,
             patient_id,
-            title="Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received",
-            body=f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
-            f"{expected_time}.",
+            title=booking_title,
+            body=booking_body,
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
@@ -202,13 +207,15 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
         )
         patient_result = await db.execute(select(User).where(User.id == patient_id))
         patient = patient_result.scalar_one_or_none()
-        if patient and patient.email:
-            email_subject = "Booking confirmed" if status == BookingStatus.CONFIRMED else "Booking received"
-            email_body = (
-                f"Token #{token_number} at {doctor.full_name} on {payload.appointment_date}, "
-                f"{expected_time}."
+        if patient and patient.device_push_token:
+            await notification_service.send_push(
+                device_token=patient.device_push_token,
+                title=booking_title,
+                body=booking_body,
+                data={"booking_id": str(booking.id)},
             )
-            send_transactional_email.delay(patient.email, email_subject, email_body)
+        if patient and patient.email:
+            send_transactional_email.delay(patient.email, booking_title, booking_body)
     except Exception:  # noqa: BLE001
         logging.getLogger("bookings.service").exception("failed to create in-app notification for booking")
 
@@ -459,6 +466,13 @@ async def cancel_booking(
         )
         patient_result = await db.execute(select(User).where(User.id == booking.patient_id))
         patient = patient_result.scalar_one_or_none()
+        if patient and patient.device_push_token:
+            await notification_service.send_push(
+                device_token=patient.device_push_token,
+                title="Booking cancelled",
+                body=cancellation_body,
+                data={"booking_id": str(booking.id)},
+            )
         if patient and patient.email:
             send_transactional_email.delay(patient.email, "Booking cancelled", cancellation_body)
     except Exception:  # noqa: BLE001
