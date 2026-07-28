@@ -24,6 +24,7 @@ from app.modules.notifications.models import NotificationType
 from app.modules.notifications.service import create_notification
 from app.modules.notifications.tasks import send_transactional_email
 from app.modules.rewards.service import credit_facility_earning, credit_reward_points
+from app.services.invoice_generator import generate_and_upload_invoice
 from app.services.notification_service import notification_service
 from app.services.payment_service import payment_service
 
@@ -52,6 +53,42 @@ async def _next_token_number(db: AsyncSession, doctor_id: uuid.UUID, appointment
         )
     )
     return int(result.scalar_one()) + 1
+
+
+async def _dispatch_invoice(
+    db: AsyncSession, booking: Booking, doctor_name: str, facility_name: str, facility_address: str
+) -> None:
+    """Generates the invoice PDF and emails/pushes the link to the patient.
+    Best-effort only — never raises, so a PDF/upload/email failure can
+    never affect the booking itself. Only called once a booking is
+    CONFIRMED (cash: immediately; online: after payment verification)."""
+    try:
+        invoice_url = await generate_and_upload_invoice(db, booking, doctor_name, facility_name, facility_address)
+        if not invoice_url:
+            return
+
+        patient_result = await db.execute(select(User).where(User.id == booking.patient_id))
+        patient = patient_result.scalar_one_or_none()
+        if not patient:
+            return
+
+        if patient.email:
+            send_transactional_email.delay(
+                patient.email,
+                "Your EazyDoctor invoice",
+                f"Your invoice for token #{booking.token_number} is ready: {invoice_url}",
+            )
+        if patient.device_push_token:
+            await notification_service.send_push(
+                device_token=patient.device_push_token,
+                title="Invoice ready",
+                body=f"Invoice for your booking (token #{booking.token_number}) is ready.",
+                data={"booking_id": str(booking.id), "invoice_url": invoice_url},
+            )
+    except Exception:  # noqa: BLE001
+        logging.getLogger("bookings.service").exception(
+            "failed to dispatch invoice for booking %s", booking.id
+        )
 
 
 # Used when a doctor has no matching availability row for the requested day —
@@ -220,6 +257,10 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
         logging.getLogger("bookings.service").exception("failed to create in-app notification for booking")
 
     qr_base64 = _generate_qr_base64(qr_uuid, signature)
+
+    if status == BookingStatus.CONFIRMED:
+        await _dispatch_invoice(db, booking, doctor.full_name, facility.name, facility.address)
+
     return booking, qr_base64
 
 
@@ -250,7 +291,8 @@ async def confirm_online_payment(db: AsyncSession, booking: Booking, gateway_res
         raise BadRequestError("Online payment verification failed")
 
     booking.online_payment_settled = True
-    if booking.status == BookingStatus.PENDING:
+    was_pending = booking.status == BookingStatus.PENDING
+    if was_pending:
         booking.status = BookingStatus.CONFIRMED
 
     await credit_facility_earning(
@@ -259,6 +301,12 @@ async def confirm_online_payment(db: AsyncSession, booking: Booking, gateway_res
 
     await db.commit()
     await db.refresh(booking)
+
+    if was_pending:
+        doctor = await get_doctor(db, booking.doctor_id)
+        facility = await get_facility(db, booking.facility_id)
+        await _dispatch_invoice(db, booking, doctor.full_name, facility.name, facility.address)
+
     return booking
 
 

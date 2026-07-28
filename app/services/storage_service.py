@@ -40,7 +40,10 @@ class CloudinaryStorageService(StorageService):
     async def upload_file(self, file: BinaryIO, folder: str, public_id: str | None = None) -> str:
         import cloudinary.uploader
 
-        result = cloudinary.uploader.upload(file, folder=folder, public_id=public_id)
+        # resource_type="auto" so non-image files (e.g. invoice PDFs) upload
+        # correctly too — Cloudinary would otherwise assume "image" and
+        # reject/mangle a PDF.
+        result = cloudinary.uploader.upload(file, folder=folder, public_id=public_id, resource_type="auto")
         return result["public_id"]
 
     async def delete_file(self, file_key: str) -> bool:

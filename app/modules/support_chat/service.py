@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import NotFoundError
 from app.core.config import settings
+from app.modules.auth.models import User
 from app.modules.bookings import service as bookings_service
 from app.modules.bookings.models import BookingStatus
 from app.modules.facilities.service import get_doctor, get_facility
 from app.modules.rewards.service import get_reward_balance
 from app.modules.support_chat.models import ChatMessage, ChatSession, ChatSessionStatus, SenderType
 from app.modules.support_chat.schemas import ChatSessionSummary
+from app.services.notification_service import notification_service
 from app.services.support_bot_service import get_bot_reply
 
 # Keyword fallback used only if a user's very first message already sounds
@@ -174,7 +176,7 @@ async def handle_user_message(db: AsyncSession, session: ChatSession, text: str)
     ]
 
     reply_text, should_escalate = await get_bot_reply(
-        history, session.language.value, await _build_user_booking_context(db, session.user_id)
+        db, session.user_id, history, session.language.value, await _build_user_booking_context(db, session.user_id)
     )
 
     bot_msg = ChatMessage(session_id=session.id, sender_type=SenderType.BOT, text=reply_text)
@@ -197,6 +199,21 @@ async def add_agent_message(db: AsyncSession, session: ChatSession, agent_id: uu
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+
+    # Best-effort — a push failure must never fail the agent's reply itself.
+    try:
+        user_result = await db.execute(select(User).where(User.id == session.user_id))
+        user = user_result.scalar_one_or_none()
+        if user and user.device_push_token:
+            await notification_service.send_push(
+                device_token=user.device_push_token,
+                title="Support reply",
+                body=text[:150],
+                data={"chat_session_id": str(session.id)},
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     return msg
 
 
