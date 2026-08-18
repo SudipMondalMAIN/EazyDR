@@ -28,6 +28,16 @@ class WithdrawalCreate(BaseModel):
     amount: float
 
 
+class WithdrawalOut(BaseModel):
+    id: uuid.UUID
+    facility_id: uuid.UUID
+    amount: float
+    status: str
+    payout_transaction_ref: str | None = None
+    failure_reason: str | None = None
+    created_at: str
+
+
 @router.get("/balance", response_model=RewardBalanceOut)
 async def my_reward_balance(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     points = await service.get_reward_balance(db, user.id)
@@ -53,3 +63,25 @@ async def withdraw(
         "status": withdrawal.status,
         "amount": withdrawal.amount,
     }
+
+
+@router.get("/withdrawals/{facility_id}", response_model=list[WithdrawalOut])
+async def list_withdrawals(
+    facility_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_merchant)
+):
+    """History of withdrawal requests for one of the merchant's own
+    facilities, most recent first."""
+    await verify_facility_owner(db, facility_id, user.id)
+    withdrawals = await service.list_withdrawals_for_facility(db, facility_id)
+    return [
+        WithdrawalOut(
+            id=w.id,
+            facility_id=w.facility_id,
+            amount=w.amount,
+            status=w.status.value,
+            payout_transaction_ref=w.payout_transaction_ref,
+            failure_reason=w.failure_reason,
+            created_at=w.created_at.isoformat(),
+        )
+        for w in withdrawals
+    ]
