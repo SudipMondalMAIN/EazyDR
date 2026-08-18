@@ -263,12 +263,16 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
+        merchant_title = "New booking"
+        merchant_body = (
+            f"{payload.patient_name} booked token #{token_number} with {doctor.full_name} "
+            f"for {payload.appointment_date}."
+        )
         await create_notification(
             db,
             facility.owner_user_id,
-            title="New booking",
-            body=f"{payload.patient_name} booked token #{token_number} with {doctor.full_name} "
-            f"for {payload.appointment_date}.",
+            title=merchant_title,
+            body=merchant_body,
             notification_type=NotificationType.BOOKING,
             related_booking_id=booking.id,
         )
@@ -283,6 +287,16 @@ async def create_booking(db: AsyncSession, patient_id: uuid.UUID, payload: Booki
             )
         if patient and patient.email:
             send_transactional_email.delay(patient.email, booking_title, booking_body)
+
+        merchant_result = await db.execute(select(User).where(User.id == facility.owner_user_id))
+        merchant = merchant_result.scalar_one_or_none()
+        if merchant and merchant.device_push_token:
+            await notification_service.send_push(
+                device_token=merchant.device_push_token,
+                title=merchant_title,
+                body=merchant_body,
+                data={"booking_id": str(booking.id)},
+            )
     except Exception:  # noqa: BLE001
         logging.getLogger("bookings.service").exception("failed to create in-app notification for booking")
 
@@ -563,6 +577,28 @@ async def cancel_booking(
                 device_token=patient.device_push_token,
                 title="Booking cancelled",
                 body=cancellation_body,
+                data={"booking_id": str(booking.id)},
+            )
+
+        merchant_cancel_body = (
+            f"Token #{booking.token_number} on {booking.appointment_date} was cancelled by the patient."
+        )
+        facility = await get_facility(db, booking.facility_id)
+        await create_notification(
+            db,
+            facility.owner_user_id,
+            title="Booking cancelled",
+            body=merchant_cancel_body,
+            notification_type=NotificationType.BOOKING,
+            related_booking_id=booking.id,
+        )
+        merchant_result = await db.execute(select(User).where(User.id == facility.owner_user_id))
+        merchant = merchant_result.scalar_one_or_none()
+        if merchant and merchant.device_push_token:
+            await notification_service.send_push(
+                device_token=merchant.device_push_token,
+                title="Booking cancelled",
+                body=merchant_cancel_body,
                 data={"booking_id": str(booking.id)},
             )
         if patient and patient.email:
