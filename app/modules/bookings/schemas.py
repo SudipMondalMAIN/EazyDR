@@ -52,6 +52,15 @@ class BookingListItemOut(BookingOut):
     facility_photo_url: str | None = None
 
 
+class FacilityBookingListItemOut(BookingOut):
+    """Used by GET /bookings/facility/{facility_id} — the Partner App's
+    booking history for one of the merchant's own facilities. No facility
+    name/address needed (the merchant already knows which facility they're
+    viewing); just the doctor name plus patient contact info for reference."""
+    doctor_name: str = ""
+    patient_phone: str = ""
+
+
 class QueueStatusOut(BaseModel):
     booking_id: uuid.UUID
     booking_code: str

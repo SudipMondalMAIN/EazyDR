@@ -492,6 +492,37 @@ async def list_bookings_for_patient_with_details(db: AsyncSession, patient_id: u
     return out
 
 
+async def list_bookings_for_facility_with_details(
+    db: AsyncSession, facility_id: uuid.UUID, status: BookingStatus | None = None
+) -> list[dict]:
+    """Merchant-facing booking history for one of their own facilities —
+    powers the Partner App's Booking History screen. Same detail-attachment
+    pattern as list_bookings_for_patient_with_details (bulk doctor lookup,
+    no N+1), scoped to this facility and optionally filtered by status,
+    most recent first."""
+    stmt = select(Booking).where(Booking.facility_id == facility_id)
+    if status is not None:
+        stmt = stmt.where(Booking.status == status)
+    stmt = stmt.order_by(Booking.created_at.desc())
+    result = await db.execute(stmt)
+    bookings = list(result.scalars().all())
+    if not bookings:
+        return []
+
+    doctor_ids = {b.doctor_id for b in bookings}
+    doc_result = await db.execute(select(Doctor).where(Doctor.id.in_(doctor_ids)))
+    doctors = {d.id: d for d in doc_result.scalars().all()}
+
+    out = []
+    for b in bookings:
+        doctor = doctors.get(b.doctor_id)
+        out.append({
+            "booking": b,
+            "doctor_name": doctor.full_name if doctor else "",
+        })
+    return out
+
+
 _APP_TZ = ZoneInfo(settings.app_timezone)
 
 

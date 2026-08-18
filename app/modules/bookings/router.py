@@ -5,10 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import ForbiddenError
 from app.core.database import get_db
-from app.modules.auth.dependencies import get_current_user, require_admin, require_patient
+from app.modules.auth.dependencies import get_current_user, require_admin, require_merchant, require_patient
 from app.modules.auth.models import User, UserRole
 from app.modules.bookings import service
-from app.modules.facilities.service import get_facility
+from app.modules.facilities.service import get_facility, verify_facility_owner
+from app.modules.bookings.models import BookingStatus
 from app.modules.bookings.schemas import (
     BookingCreate,
     BookingListItemOut,
@@ -16,6 +17,7 @@ from app.modules.bookings.schemas import (
     BookingWithQrOut,
     CancelBookingRequest,
     CancelBookingResult,
+    FacilityBookingListItemOut,
     QueueStatusOut,
     VerifyOnlinePaymentRequest,
 )
@@ -43,6 +45,27 @@ async def my_bookings(db: AsyncSession = Depends(get_db), user: User = Depends(r
         item.facility_name = row["facility_name"]
         item.facility_address = row["facility_address"]
         item.facility_photo_url = row["facility_photo_url"]
+        out.append(item)
+    return out
+
+
+@router.get("/facility/{facility_id}", response_model=list[FacilityBookingListItemOut])
+async def facility_bookings(
+    facility_id: uuid.UUID,
+    status: BookingStatus | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    """Booking history for one of the merchant's own facilities — powers
+    the Partner App's Booking History screen. Optional `status` query param
+    filters to a single status (e.g. ?status=completed); omitted returns
+    all bookings for the facility, most recent first."""
+    await verify_facility_owner(db, facility_id, user.id)
+    rows = await service.list_bookings_for_facility_with_details(db, facility_id, status)
+    out = []
+    for row in rows:
+        item = FacilityBookingListItemOut.model_validate(row["booking"])
+        item.doctor_name = row["doctor_name"]
         out.append(item)
     return out
 
