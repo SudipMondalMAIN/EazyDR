@@ -26,8 +26,25 @@ async def create_facility(db: AsyncSession, owner_user_id: uuid.UUID, payload: F
 
 
 async def list_facilities_for_owner(db: AsyncSession, owner_user_id: uuid.UUID) -> list[Facility]:
-    result = await db.execute(select(Facility).where(Facility.owner_user_id == owner_user_id))
+    # Excludes deactivated (soft-deleted) facilities — once a merchant
+    # deletes one it should disappear from their own list too, not just
+    # patient search.
+    result = await db.execute(
+        select(Facility).where(Facility.owner_user_id == owner_user_id, Facility.is_active == True)  # noqa: E712
+    )
     return list(result.scalars().all())
+
+
+async def deactivate_facility(db: AsyncSession, facility_id: uuid.UUID) -> Facility:
+    """Soft-delete: flips is_active off instead of a hard DELETE, since
+    existing bookings/doctors reference this facility and its history
+    (earnings, past appointments) must stay intact. Also drops it from
+    patient-facing search immediately (search filters is_active)."""
+    facility = await get_facility(db, facility_id)
+    facility.is_active = False
+    await db.commit()
+    await db.refresh(facility)
+    return facility
 
 
 async def get_facility(db: AsyncSession, facility_id: uuid.UUID) -> Facility:

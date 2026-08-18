@@ -117,6 +117,21 @@ async def update_facility(
     return service.attach_facility_photo_url(facility)
 
 
+@router.delete("/{facility_id}", status_code=204)
+async def delete_facility(
+    facility_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_merchant),
+):
+    """Soft-deletes the merchant's own facility (sets is_active=False).
+    Doctors/bookings/earnings history are untouched; the facility just
+    stops appearing in patient search and 'My Facilities'."""
+    await service.verify_facility_owner(db, facility_id, user.id)
+    await service.deactivate_facility(db, facility_id)
+    await cache_service.delete(f"cache:facility:{facility_id}")
+    await cache_service.delete_prefix("cache:facility_search:")
+
+
 @router.post("/{facility_id}/photo", response_model=FacilityOut)
 async def upload_facility_photo(
     facility_id: uuid.UUID,
